@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "noImplicitAny": true,
+    // "checkJs": true,
+    "removeComments": true,
+    "emitDecoratorMetadata": true,
+    "allowJs": true,
+    "moduleResolution": "NodeNext",
+    "target": "ESNext",
+    "module": "NodeNext",
+    "strict": true,
+    "lib": ["ESNext", "DOM"],
+    "noImplicitThis": false,
+    "outDir": "../_aerilate",
+    "composite": true,
+    "experimentalDecorators": true,
+    "skipLibCheck": true,
+    "rootDir": "./",
+    "baseUrl": "./"
+  },
+  "exclude": ["./**/css", "./css", "./_swallow", "_sweetss", "./_css"]
+}
