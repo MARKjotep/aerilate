@@ -11,12 +11,11 @@
     "strict": true,
     "lib": ["ESNext", "DOM"],
     "noImplicitThis": false,
-    "outDir": "../_aerilate",
+    "outDir": "../../dist/aerilate",
     "composite": true,
     "experimentalDecorators": true,
     "skipLibCheck": true,
     "rootDir": "./",
     "baseUrl": "./"
-  },
-  "exclude": ["./**/css", "./css", "./_swallow", "_sweetss", "./_css"]
+  }
 }

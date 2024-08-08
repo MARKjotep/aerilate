@@ -384,10 +384,10 @@ export const { Aeri, render } = (function () {
       this.head = "";
     }
 
-    _head(mid: string) {
+    _head() {
       let fs = `<script type="module">`;
       fs += `\nimport x from "${this.rpath}";`;
-      fs += `\nx.dom(x.id('${mid}'),${this.data});`;
+      fs += `\nx.dom(${this.data});`;
       fs += `\n</script>`;
       return fs;
     }
@@ -418,28 +418,18 @@ export const { Aeri, render } = (function () {
       return [...__.headAttr(_h2), ...__.headAttr(xxh)];
     }
     html(ctx: string | render | any = ""): string {
-      let xtc: string = "";
       let bscr = "";
       if (ctx instanceof render) {
-        try {
-          const _id = $$.makeID(7);
-          xtc = `<div id="${_id}" class="root"></div>`;
-          bscr = ctx._head(_id);
-        } catch (e: any) {
-          console.error(e);
-        }
-        // --
-      } else {
-        xtc = ctx;
+        bscr = ctx._head();
       }
+      const _id = $$.makeID(7);
       let fin = "<!DOCTYPE html>";
       fin += `\n<html lang="${this.lang}">`;
       fin += "\n<head>\n";
       fin += this.heads.join("\n");
       fin += "\n" + bscr;
       fin += "\n</head>";
-      fin += `\n<body>\n`;
-      fin += xtc;
+      fin += `\n<body id="${_id}">\n`;
       fin += "\n</body>";
       fin += "\n</html>";
       return fin;
@@ -733,6 +723,7 @@ export const { Aeri, render } = (function () {
             const z_args = __.args(x_args, y_args);
 
             const { sid, jwtv, refreshjwt } = this.__reqs(app, req);
+
             const a_args: dict<boolean> = {};
             const sjwt = app._jwt.open(jwtv, { minutes: 30 });
             const sesh = !jwtv ? app.xsession.openSession(sid) : null;
@@ -754,6 +745,7 @@ export const { Aeri, render } = (function () {
             });
 
             // ------------------
+
             let CTX = await FS[method](z_args);
 
             this.headers.push(...(FS.httpHeader as string[][]));
@@ -907,8 +899,7 @@ export const { Aeri, render } = (function () {
           }
         } else {
           if (ctx) {
-            const murl = req.url == "/" ? "index" : req.url.slice(1);
-            writeFileSync(murl + ".html", ctx);
+            writeFileSync("index.html", ctx);
             return ctx;
           }
         }
