@@ -1039,12 +1039,11 @@ export const { Aeri, render } = (function () {
         method: "GET",
         hostname: "localhost",
         port: 3000,
-        wssport: 4000,
         options: {},
       },
     ) {
       // -------------------------------------------
-      const { url, method, hostname, port, wssport, options } = opt;
+      const { url, method, hostname, port, options } = opt;
       let host = hostname ?? "localhost";
 
       const RN = new runner(this);
@@ -1064,25 +1063,25 @@ export const { Aeri, render } = (function () {
             ...options,
           };
 
-          if (wssport) {
-            new Server({
-              server: createServer(_options, function (req, res) {
-                res.statusCode = 404;
-                res.end();
-              }).listen(wssport, host),
-            }).on("connection", async function (ws, req) {
-              if (
-                req.url &&
-                req.method == "GET" &&
-                req.headers?.connection == "Upgrade"
-              ) {
-                const Request = new request(req.url, req.method, req.headers);
-                await RN.wss(Request, ws);
-              } else {
-                ws.close();
-              }
-            });
-          }
+          // if (wssport) {
+          //   new Server({
+          //     server: createServer(_options, function (req, res) {
+          //       res.statusCode = 404;
+          //       res.end();
+          //     }).listen(wssport, host),
+          //   }).on("connection", async function (ws, req) {
+          //     if (
+          //       req.url &&
+          //       req.method == "GET" &&
+          //       req.headers?.connection == "Upgrade"
+          //     ) {
+          //       const Request = new request(req.url, req.method, req.headers);
+          //       await RN.wss(Request, ws);
+          //     } else {
+          //       ws.close();
+          //     }
+          //   });
+          // }
 
           const SRVR = createSecureServer(_options, async function (req, res) {
             // -------------------
@@ -1108,9 +1107,23 @@ export const { Aeri, render } = (function () {
             }
           });
 
+          new Server({
+            server: SRVR as any,
+          }).on("connection", async function (ws, req) {
+            if (
+              req.url &&
+              req.method == "GET" &&
+              req.headers?.connection == "Upgrade"
+            ) {
+              const Request = new request(req.url, req.method, req.headers);
+              await RN.wss(Request, ws);
+            } else {
+              ws.close();
+            }
+          });
+
           SRVR.listen(port, host, () => {
-            let sl = `Running ${host}@${port} & `;
-            if (wssport) sl += `socket@${wssport}`;
+            let sl = `Running ${host}@${port}`;
             console.log(sl);
           });
           //
