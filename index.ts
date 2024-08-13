@@ -1031,7 +1031,6 @@ export const { Aeri, render } = (function () {
         method?: string;
         hostname?: string;
         port?: number;
-        wssport?: number;
         options?: any;
       } = {
         url: "",
@@ -1062,26 +1061,6 @@ export const { Aeri, render } = (function () {
             ...options,
           };
 
-          // if (wssport) {
-          //   new Server({
-          //     server: createServer(_options, function (req, res) {
-          //       res.statusCode = 404;
-          //       res.end();
-          //     }).listen(wssport, host),
-          //   }).on("connection", async function (ws, req) {
-          //     if (
-          //       req.url &&
-          //       req.method == "GET" &&
-          //       req.headers?.connection == "Upgrade"
-          //     ) {
-          //       const Request = new request(req.url, req.method, req.headers);
-          //       await RN.wss(Request, ws);
-          //     } else {
-          //       ws.close();
-          //     }
-          //   });
-          // }
-
           const SRVR = createSecureServer(_options, async function (req, res) {
             // -------------------
             if (req.url && req.method) {
@@ -1098,7 +1077,7 @@ export const { Aeri, render } = (function () {
                   await RN.render(Request, res);
                 });
               } else {
-                if (req.headers?.connection == "Upgrade") {
+                if (req.headers.upgrade == "websocket") {
                 } else {
                   await RN.render(Request, res);
                 }
@@ -1112,7 +1091,7 @@ export const { Aeri, render } = (function () {
             if (
               req.url &&
               req.method == "GET" &&
-              req.headers?.connection == "Upgrade"
+              req.headers.upgrade == "websocket"
             ) {
               const Request = new request(req.url, req.method, req.headers);
               await RN.wss(Request, ws);
