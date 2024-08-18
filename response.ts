@@ -8,6 +8,8 @@ import {
   unlinkSync,
 } from "node:fs";
 import { sign, verify } from "jsonwebtoken";
+import { Aeri } from "./index";
+import { SupabaseClient } from "@supabase/supabase-js";
 
 // Types -----------------------
 export interface dict<T> {
@@ -32,6 +34,8 @@ type sessionConfig = {
   INTERFACE: string;
   STORAGE: string;
   JWT_STORAGE: string;
+  SUPABASE_CLIENT: any;
+  SUPABASE_TABLE: string;
 };
 type V = string | number | boolean;
 // -----------------------------
@@ -304,6 +308,17 @@ export class serverInterface extends sidGenerator {
   fetchSession(sid: string) {
     return {};
   }
+  saveSession(xsesh: serverSide, rsx?: any, deleteMe: boolean = false) {
+    return;
+  }
+  getExpiration(config: sessionConfig, xsesh: serverSide): string | null {
+    if (xsesh.permanent) {
+      const now = new Date();
+      const lifet = config.LIFETIME;
+      return now.setDate(now.getDate() + lifet).toString();
+    }
+    return null;
+  }
 }
 
 class cacher {
@@ -381,6 +396,7 @@ class cSession extends serverInterface {
     const data = JSON.stringify(xsesh.data);
 
     this.cacher.set(prefs, { data }, life);
+
     if (rsx) {
       const cookie = this.setCookie(xsesh, timeDelta(life));
       rsx.setHeader("Set-Cookie", cookie);
@@ -393,18 +409,97 @@ class cSession extends serverInterface {
   }
 }
 
+// --------------
+export class postgreSQLSession extends serverSide {}
+
+class postgreSQL extends serverInterface {
+  cacher: cacher;
+  sclass = fSession;
+  constructor(config: sessionConfig, secret: string, cacherpath = ".sessions") {
+    super(config, secret);
+    this.cacher = new cacher(cacherpath);
+  }
+  fetchSession(sid: string): any {}
+  saveSession(xsesh: serverSide, rsx?: any, deleteMe?: boolean): void {}
+}
+
+// --------------
+export class supaSession extends serverSide {}
+
+class supaBaseSS extends serverInterface {
+  sclass = supaSession;
+  client: any;
+  constructor(client: any, config: sessionConfig, secret: string) {
+    super(config, secret);
+    this.client = client;
+  }
+  fetchSession(sid: string): any {
+    const prefs = this.config.KEY_PREFIX + sid;
+    // ----
+    let itm: string[] = this.client.select("data").eq("sid", prefs).data;
+    let data = {};
+    if (itm.length) {
+      data = JSON.parse(itm[0]);
+    }
+    return new this.sclass(sid, this.config.PERMANENT, data).session;
+  }
+  saveSession(xsesh: serverSide, rsx?: any, deleteMe?: boolean): void {
+    const prefs = this.config.KEY_PREFIX + xsesh.sid;
+    if (!Object.entries(xsesh.data).length) {
+      if (xsesh.modified || deleteMe) {
+        this.client.delete().eq("id", prefs);
+        if (rsx) {
+          const cookie = this.setCookie(xsesh, 0);
+          rsx.setHeader("Set-Cookie", cookie);
+        }
+      }
+      return;
+    }
+    const life = this.config.LIFETIME;
+    const data = JSON.stringify(xsesh.data);
+
+    // this.cacher.set(prefs, { data }, life);
+    if (rsx) {
+      const expre = this.getExpiration(this.config, xsesh);
+      this.client.upsert({
+        id: prefs,
+        data: data,
+        expiration: expre ? expre : null,
+      });
+      const cookie = this.setCookie(xsesh, timeDelta(life));
+      rsx.setHeader("Set-Cookie", cookie);
+    }
+  }
+}
+
 export class reSession {
   config: sessionConfig;
   secret: string;
-  constructor(config: sessionConfig | dict<any>, secret: string) {
+  app: InstanceType<typeof Aeri>;
+  constructor(
+    app: InstanceType<typeof Aeri>,
+    config: sessionConfig | dict<any>,
+    secret: string,
+  ) {
     this.config = config as sessionConfig;
     this.secret = secret;
+    this.app = app;
   }
   get(session: string) {
-    if (session == "fs") {
+    if (session == "supabase") {
+      const { CLIENT, TABLE } = this.app.supabase;
+      if (CLIENT) {
+        try {
+          return new supaBaseSS(CLIENT.from(TABLE), this.config, this.secret);
+        } catch (e) {
+          console.log(`Table : ${TABLE} is not found in client server!`);
+        }
+        // ---
+      }
     } else if (session == "jwt") {
       return new cSession(this.config, this.secret, this.config.JWT_STORAGE);
     }
+
     return new cSession(this.config, this.secret, this.config.STORAGE);
   }
 }

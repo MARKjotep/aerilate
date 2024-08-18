@@ -13,6 +13,7 @@ import { request, strip } from "./request";
 // -----------
 import { Server, WebSocket } from "ws";
 import { lookup } from "mime-types";
+import { SupabaseClient } from "@supabase/supabase-js";
 
 /**
  * TODO:
@@ -52,6 +53,12 @@ type link<T> = {
   type?: T;
   as?: T;
 };
+
+type impmap = {
+  imports?: dict<string>;
+  scopes?: dict<string>;
+  integrity?: dict<string>;
+};
 type script<T> = {
   async?: T;
   crossorigin?: T;
@@ -62,6 +69,7 @@ type script<T> = {
   src?: T;
   type?: "text/javascript" | T;
   id?: T;
+  importmap?: impmap;
 };
 type base = {
   href?: string;
@@ -75,6 +83,11 @@ interface headP {
   script?: script<V>[];
 }
 type respwss = InstanceType<typeof wss>;
+
+interface sbase {
+  CLIENT: SupabaseClient | null;
+  TABLE: string;
+}
 
 // ----------------------------
 
@@ -216,7 +229,9 @@ export const { response, session, jwt, jwt_refresh, wss } = (function () {
     return c;
   }
   class wss {
+    session = new fSession().session;
     socket: null | WebSocket;
+    request = new request("", "", {});
     constructor(...args: any[]) {
       this.socket = null;
     }
@@ -346,8 +361,17 @@ export const { Aeri, render } = (function () {
           } else if (Array.isArray(vv)) {
             const rdced = vv.reduce((prv, vl) => {
               let ender = "";
+
               if (kk == "script") {
-                ender = `</${kk}>`;
+                let scrptbdy = "";
+                if ("importmap" in vl) {
+                  vl["type"] = "importmap";
+                  scrptbdy = JSON.stringify(vl.importmap);
+                  delete vl.importmap;
+                  //
+                }
+                $$.p = scrptbdy;
+                ender = `${scrptbdy}</${kk}>`;
               }
               prv.push(`<${kk}${__.attr(vl)}>${ender}`);
               return prv;
@@ -388,6 +412,7 @@ export const { Aeri, render } = (function () {
       fs += `\nimport x from "${this.rpath}";`;
       fs += `\nx.dom(${this.data});`;
       fs += `\n</script>`;
+
       return fs;
     }
   }
@@ -565,7 +590,7 @@ export const { Aeri, render } = (function () {
   }
   // --------------------
   const rBytes = new RegExp(/(\d+)(\d*)/, "m");
-
+  const wssClients: dict<dict<respwss>> = {};
   class rsx {
     furl: fURL | null;
     status: number;
@@ -623,8 +648,7 @@ export const { Aeri, render } = (function () {
       }
       return null;
     }
-    wss(_wss: WebSocket) {
-      const wssClients: dict<dict<respwss>> = {};
+    wss(req: request, _wss: WebSocket, app: Aeri) {
       if (this.furl) {
         const { f, x_args, y_args, rurl, broadcastWSS } = this.furl;
         if (f) {
@@ -632,6 +656,12 @@ export const { Aeri, render } = (function () {
           const FS: any = new f(z_args);
           const wid = __.makeID(10);
           FS.socket = _wss;
+          FS.request = req;
+          const { sid, jwtv, refreshjwt } = this.__reqs(app, req);
+          if (sid) {
+            FS.session = app.xsession.openSession(sid);
+          }
+
           // --------
           if (broadcastWSS) {
             if (!(rurl in wssClients)) {
@@ -644,6 +674,7 @@ export const { Aeri, render } = (function () {
 
           // ------------------
           FS.onConnect();
+
           _wss.on("message", (message) => {
             const msg = message.toString("utf-8");
             if (broadcastWSS) {
@@ -848,7 +879,7 @@ export const { Aeri, render } = (function () {
         const ZX = this.Z.get(parsed, true);
         if (ZX.furl) {
           ZX.furl.rurl = req.url;
-          ZX.wss(soc);
+          ZX.wss(req, soc, this.app);
         } else {
           soc.close();
         }
@@ -923,6 +954,7 @@ export const { Aeri, render } = (function () {
       return true;
     }
   };
+
   class _c {
     constructor(dir: string, env_path: string = "") {
       const PRIV = dir + "/private/";
@@ -966,20 +998,26 @@ export const { Aeri, render } = (function () {
       STORAGE: ".sessions",
       JWT_STORAGE: ".jwtsessions",
     };
+    supabase: sbase = {
+      CLIENT: null,
+      TABLE: "",
+    };
     google = {
       id: "",
       secret: "",
     };
-    set sessionInterface(intrfce: "fs" | "supabase" | "sql") {
+    set sessionInterface(intrfce: "supabase" | "postgres") {
       this.session.INTERFACE = intrfce;
     }
     get xsession() {
-      return new reSession(this.session, this.secret_key).get(
+      return new reSession(this as any, this.session, this.secret_key).get(
         this.session.INTERFACE,
       );
     }
     get jwtsession() {
-      return new reSession(this.session, this.secret_key).get("jwt");
+      return new reSession(this as any, this.session, this.secret_key).get(
+        "jwt",
+      );
     }
     GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
     temp_samesite = "";
