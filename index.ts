@@ -1,4 +1,8 @@
-import { Http2ServerResponse, createSecureServer } from "node:http2";
+import {
+  Http2ServerResponse,
+  createSecureServer,
+  ServerHttp2Stream,
+} from "node:http2";
 import zlib from "node:zlib";
 import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import {
@@ -27,7 +31,7 @@ import { SupabaseClient } from "@supabase/supabase-js";
  * 7. JWT auth -
  * 8. GOOGLE Aut -
  * 9. Telegram --- in progress
- * 10. Fix the byte-range request for files - Done
+ * 10. Fix the byte-range request for files - Done∫
  */
 
 // Types -----------------------
@@ -82,6 +86,12 @@ interface headP {
   link?: link<V>[];
   script?: script<V>[];
 }
+
+interface repsWSS {
+  WSS: InstanceType<typeof wss>;
+  role: "maker" | "joiner";
+}
+
 type respwss = InstanceType<typeof wss>;
 
 interface sbase {
@@ -122,23 +132,27 @@ export class $$ {
     return result;
   }
 }
+
+const wssClients: dict<dict<repsWSS>> = {};
 export const { response, session, jwt, jwt_refresh, wss } = (function () {
   class eStream {
     res: Http2ServerResponse | null = null;
+    is: ServerHttp2Stream | null = null;
     push({
       id,
       event,
       data,
       retry,
+      end,
     }: {
       id: string | number;
       event: string;
       data: string | dict<string>;
       retry?: number;
+      end?: boolean;
     }) {
       const res = this.res;
       if (res) {
-        // res.write()
         if (retry) {
           res.write(`retry: ${retry}\n`);
         }
@@ -149,6 +163,9 @@ export const { response, session, jwt, jwt_refresh, wss } = (function () {
         } else {
           res.write("data: " + data + "\n\n");
         }
+        if (end) {
+          res.write(`end`);
+        }
       }
     }
   }
@@ -158,14 +175,14 @@ export const { response, session, jwt, jwt_refresh, wss } = (function () {
     _headattr: any = {};
     lang: string = "en";
     httpHeader: string[][] = [];
-    eStream = new eStream();
+    stream = new eStream();
     jwt = new xjwt().jwt;
-    get(...args: any[]): any {}
-    post(...args: any[]): any {}
-    put(...args: any[]): any {}
-    patch(...args: any[]): any {}
-    error(...args: any[]): any {}
-    eventStream(...args: any[]): any {}
+    async get(...args: any[]): Promise<any> {}
+    async post(...args: any[]): Promise<any> {}
+    async put(...args: any[]): Promise<any> {}
+    async patch(...args: any[]): Promise<any> {}
+    async error(...args: any[]): Promise<any> {}
+    async eventStream(...args: any[]): Promise<any> {}
     set head(heads: headP) {
       $$.O.items(heads).forEach(([k, v]) => {
         if (k == "title" || k == "base") {
@@ -193,6 +210,9 @@ export const { response, session, jwt, jwt_refresh, wss } = (function () {
     }
     deleteCookie(key: string) {
       this.setCookie(key, "", "/", 0);
+    }
+    get wssClients() {
+      return $$.O.keys(wssClients);
     }
   }
   function session(...itm: any[]) {
@@ -232,14 +252,19 @@ export const { response, session, jwt, jwt_refresh, wss } = (function () {
     session = new fSession().session;
     socket: null | WebSocket;
     request = new request("", "", {});
+    data: dict<V> = {};
+    wid: string = "";
+    wssURL: string = "";
+    role: "maker" | "joiner" | "alien" = "joiner";
     constructor(...args: any[]) {
       this.socket = null;
     }
-    onConnect() {
+    async init(...args: any[]) {}
+    async onConnect(message?: string) {
       this.send = "connected!";
     }
-    onMessage(message?: string) {}
-    onClose() {}
+    async onMessage(message?: string) {}
+    async onClose(message?: string) {}
     set send(message: string | object) {
       if (this.socket) {
         if (typeof message == "object") {
@@ -247,6 +272,19 @@ export const { response, session, jwt, jwt_refresh, wss } = (function () {
         } else {
           this.socket.send(message);
         }
+      }
+    }
+    set broadcast(message: string | object) {
+      if (this.socket) {
+        let mess: string = "";
+        if (typeof message == "object") {
+          mess = JSON.stringify(message);
+        } else {
+          mess = message;
+        }
+        $$.O.items(wssClients[this.wssURL]).forEach(([mid, wsx]) => {
+          wsx.WSS.onMessage(mess);
+        });
       }
     }
     get close() {
@@ -259,7 +297,7 @@ export const { response, session, jwt, jwt_refresh, wss } = (function () {
 
   return { response, session, jwt, jwt_refresh, wss };
 })();
-export const { Aeri, render } = (function () {
+export const { Aeri, foresight } = (function () {
   class __ {
     static makeID(length: number) {
       let result = "";
@@ -370,7 +408,7 @@ export const { Aeri, render } = (function () {
                   delete vl.importmap;
                   //
                 }
-                $$.p = scrptbdy;
+
                 ender = `${scrptbdy}</${kk}>`;
               }
               prv.push(`<${kk}${__.attr(vl)}>${ender}`);
@@ -396,8 +434,7 @@ export const { Aeri, render } = (function () {
       return _attr.join(" ");
     }
   }
-
-  class render {
+  class foresight {
     rpath: string;
     data: string;
     head: string;
@@ -416,7 +453,6 @@ export const { Aeri, render } = (function () {
       return fs;
     }
   }
-
   class htmlx {
     heads: string[];
     lang: string;
@@ -441,10 +477,13 @@ export const { Aeri, render } = (function () {
       }, {});
       return [...__.headAttr(_h2), ...__.headAttr(xxh)];
     }
-    html(ctx: string | render | any = ""): string {
+    html(ctx: string | foresight | any = ""): string {
       let bscr = "";
-      if (ctx instanceof render) {
+      let _ctx = "";
+      if (ctx instanceof foresight) {
         bscr = ctx._head();
+      } else {
+        _ctx = ctx;
       }
       const _id = $$.makeID(7);
       let fin = "<!DOCTYPE html>";
@@ -454,6 +493,7 @@ export const { Aeri, render } = (function () {
       fin += "\n" + bscr;
       fin += "\n</head>";
       fin += `\n<body id="${_id}">\n`;
+      _ctx && (fin += "\n" + _ctx);
       fin += "\n</body>";
       fin += "\n</html>";
       return fin;
@@ -469,6 +509,7 @@ export const { Aeri, render } = (function () {
     isFile: boolean;
     mtype: string;
     broadcastWSS = false;
+    maxClient: number | null = null;
     constructor(
       url: string,
       cname: typeof response | typeof wss | null = null,
@@ -590,7 +631,7 @@ export const { Aeri, render } = (function () {
   }
   // --------------------
   const rBytes = new RegExp(/(\d+)(\d*)/, "m");
-  const wssClients: dict<dict<respwss>> = {};
+
   class rsx {
     furl: fURL | null;
     status: number;
@@ -648,77 +689,6 @@ export const { Aeri, render } = (function () {
       }
       return null;
     }
-    wss(req: request, _wss: WebSocket, app: Aeri) {
-      if (this.furl) {
-        const { f, x_args, y_args, rurl, broadcastWSS } = this.furl;
-        if (f) {
-          const z_args = __.args(x_args, y_args);
-          const FS: any = new f(z_args);
-          const wid = __.makeID(10);
-          FS.socket = _wss;
-          FS.request = req;
-          const { sid, jwtv, refreshjwt } = this.__reqs(app, req);
-          if (sid) {
-            FS.session = app.xsession.openSession(sid);
-          }
-
-          // --------
-          if (broadcastWSS) {
-            if (!(rurl in wssClients)) {
-              wssClients[rurl] = {};
-            }
-            if (!(wid in wssClients[rurl])) {
-              wssClients[rurl][wid] = FS;
-            }
-          }
-
-          // ------------------
-          FS.onConnect();
-
-          _wss.on("message", (message) => {
-            const msg = message.toString("utf-8");
-            if (broadcastWSS) {
-              $$.O.items(wssClients[rurl]).forEach(([mid, wsx]) => {
-                if (mid != wid) {
-                  wsx.onMessage(msg);
-                }
-              });
-            } else {
-              FS.onMessage(msg);
-            }
-          });
-          _wss.on("close", () => {
-            FS.onClose();
-            if (broadcastWSS) {
-              delete wssClients[rurl][wid];
-            }
-            _wss.close();
-          });
-        }
-      }
-    }
-    eventStream(app: Aeri, req: request, res: Http2ServerResponse) {
-      if (this.furl) {
-        const { f, url, x_args, y_args } = this.furl;
-        if (f) {
-          const z_args = __.args(x_args, y_args);
-          const FS: any = new f();
-          if (typeof FS["eventStream"] == "function") {
-            FS.eStream.res = res;
-            let sid = "";
-            if ("session" in req.cookies) {
-              sid = req.cookies.session;
-            }
-            const sesh = app.xsession.openSession(sid);
-            if (!sesh.new) {
-              Object.assign(z_args, { session: true });
-            }
-            // Object.assign(z_args, { write: res.write });
-            FS["eventStream"](z_args);
-          }
-        }
-      }
-    }
     __reqs(app: Aeri, req: request) {
       let sid = "";
       let jwtv = "";
@@ -735,6 +705,120 @@ export const { Aeri, render } = (function () {
       }
 
       return { sid, jwtv, refreshjwt };
+    }
+    async wss(req: request, _wss: WebSocket, app: Aeri) {
+      if (this.furl) {
+        const { f, x_args, y_args, rurl, broadcastWSS, maxClient } = this.furl;
+        if (f) {
+          const z_args = __.args(x_args, y_args);
+          const FS: any = new f(z_args);
+          // ------
+          FS.socket = _wss;
+          FS.wssURL = rurl;
+          FS.request = req;
+          const { sid } = this.__reqs(app, req);
+          if (sid) {
+            FS.session = app.xsession.openSession(sid);
+          }
+
+          // --------
+          if (typeof FS["init"] == "function") await FS.init(z_args);
+
+          const wid = FS.wid ? FS.wid : __.makeID(10);
+          FS.wid = wid;
+          let allowConnect = false;
+          if (broadcastWSS) {
+            if (!(rurl in wssClients)) {
+              wssClients[rurl] = {};
+            }
+            //]
+            const wslen = $$.O.keys(wssClients[rurl]).length;
+            if (maxClient !== null) {
+              if (wslen < maxClient) {
+                if (!(wid in wssClients[rurl])) {
+                  FS.role = wslen == 0 ? "maker" : "joiner";
+                  wssClients[rurl][wid] = {
+                    WSS: FS,
+                    role: FS.role,
+                  };
+                  allowConnect = true;
+                } else {
+                }
+              } else {
+                await FS.onClose("maxClient");
+                _wss.close();
+              }
+            } else {
+              if (!(wid in wssClients[rurl])) {
+                FS.role = wslen == 0 ? "maker" : "joiner";
+                wssClients[rurl][wid] = {
+                  WSS: FS,
+                  role: FS.role,
+                };
+                allowConnect = true;
+              } else {
+              }
+            }
+          }
+          // ------------------
+          // On connection allowed
+          if (allowConnect) {
+            await FS.onConnect();
+            //
+            _wss.on("message", async (message) => {
+              const msg = message.toString("utf-8");
+              if (broadcastWSS) {
+                $$.O.items(wssClients[rurl]).forEach(async ([mid, wsx]) => {
+                  if (mid != wid) {
+                    await wsx.WSS.onMessage(msg);
+                  }
+                });
+              } else {
+                await FS.onMessage(msg);
+              }
+            });
+            _wss.on("close", async () => {
+              if (broadcastWSS) {
+                const cwid = wssClients[rurl][wid];
+                const crurlen = $$.O.keys(wssClients[rurl]);
+                if (crurlen.length == 0) {
+                  delete wssClients[rurl];
+                } else if (crurlen.length > 1 && cwid.role == "maker") {
+                  const newMaker = crurlen[1];
+                  wssClients[rurl][newMaker].role = "maker";
+                  wssClients[rurl][newMaker].WSS.role = "maker";
+                }
+                delete wssClients[rurl][wid];
+              }
+              await FS.onClose();
+              _wss.close();
+            });
+          }
+        }
+      }
+    }
+    async eventStream(app: Aeri, req: request, res: Http2ServerResponse) {
+      if (this.furl) {
+        const { f, url, x_args, y_args } = this.furl;
+        if (f) {
+          const z_args = __.args(x_args, y_args);
+          const FS: any = new f();
+          if (typeof FS["eventStream"] == "function") {
+            FS.stream.res = res;
+            FS.stream.is = res.stream;
+
+            let sid = "";
+            if ("session" in req.cookies) {
+              sid = req.cookies.session;
+            }
+            const sesh = app.xsession.openSession(sid);
+            if (!sesh.new) {
+              Object.assign(z_args, { session: true });
+            }
+            await FS["eventStream"](z_args);
+          }
+        }
+      }
     }
     async response(
       method: string = "get",
@@ -777,9 +861,7 @@ export const { Aeri, render } = (function () {
             // ------------------
 
             let CTX = await FS[method](z_args);
-
             this.headers.push(...(FS.httpHeader as string[][]));
-
             if (CTX == null) {
               if (method == "get") {
                 this.status = 401;
@@ -879,7 +961,7 @@ export const { Aeri, render } = (function () {
         const ZX = this.Z.get(parsed, true);
         if (ZX.furl) {
           ZX.furl.rurl = req.url;
-          ZX.wss(req, soc, this.app);
+          await ZX.wss(req, soc, this.app);
         } else {
           soc.close();
         }
@@ -895,7 +977,7 @@ export const { Aeri, render } = (function () {
           "Content-Type": "text/event-stream",
           "Cache-Control": "no-cache",
         });
-        ZX.eventStream(this.app, req, res);
+        await ZX.eventStream(this.app, req, res);
       } else {
         const ctx = await ZX.response(req.method, this.app, req);
         if (res) {
@@ -1038,10 +1120,18 @@ export const { Aeri, render } = (function () {
       };
       return ins;
     }
-    wss(url: string, opts = { broadcast: false }) {
+    wss(
+      url: string,
+      opts: { broadcast: boolean; maxClient?: number } = {
+        broadcast: false,
+      },
+    ) {
       const ins = (f: typeof wss) => {
         const _fr = new fURL(url, f);
         _fr.broadcastWSS = opts.broadcast;
+        if (opts.maxClient) {
+          _fr.maxClient = opts.maxClient;
+        }
         this.Z.wss = _fr;
         return f;
       };
@@ -1163,7 +1253,7 @@ export const { Aeri, render } = (function () {
     }
   }
 
-  return { Aeri, render };
+  return { Aeri, foresight };
 })();
 
 export const { GOAT } = (function () {
@@ -1287,7 +1377,6 @@ class tg {}
 
 /**
  * IDEAS
- * Record player.
  * Scheduling software
  * Dashboard
  * Japanese learning
