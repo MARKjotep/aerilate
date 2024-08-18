@@ -9,7 +9,6 @@ import {
 } from "node:fs";
 import { sign, verify } from "jsonwebtoken";
 import { Aeri } from "./index";
-import { SupabaseClient } from "@supabase/supabase-js";
 
 // Types -----------------------
 export interface dict<T> {
@@ -335,18 +334,18 @@ class cacher {
     hash.update(bkey);
     return hash.digest("hex");
   }
-
   isFile(path: string) {
     try {
       return statSync(path).isFile();
     } catch (err) {
       writeFileSync(path, str2Buffer(""));
+      return true;
     }
   }
   delete(key: string) {
     const gspot = this.path + "/" + this.fileName(key);
     try {
-      if (existsSync(gspot)) {
+      if (statSync(gspot).isFile()) {
         unlinkSync(gspot);
       }
     } catch (err) {}
@@ -396,7 +395,6 @@ class cSession extends serverInterface {
     const data = JSON.stringify(xsesh.data);
 
     this.cacher.set(prefs, { data }, life);
-
     if (rsx) {
       const cookie = this.setCookie(xsesh, timeDelta(life));
       rsx.setHeader("Set-Cookie", cookie);

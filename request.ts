@@ -1,4 +1,4 @@
-import { IncomingHttpHeaders } from "node:http";
+import { IncomingHttpHeaders } from "node:http2";
 import { writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 
