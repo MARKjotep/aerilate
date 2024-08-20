@@ -18,6 +18,7 @@ import { request, strip } from "./request";
 import { Server, WebSocket } from "ws";
 import { lookup } from "mime-types";
 import { SupabaseClient } from "@supabase/supabase-js";
+import { Client, QueryConfig } from "pg";
 
 /**
  * TODO:
@@ -92,8 +93,6 @@ interface repsWSS {
   role: "maker" | "joiner";
 }
 
-type respwss = InstanceType<typeof wss>;
-
 interface sbase {
   CLIENT: SupabaseClient | null;
   TABLE: string;
@@ -101,37 +100,59 @@ interface sbase {
 
 // ----------------------------
 
-export class $$ {
-  static set p(a: any) {
-    if (Array.isArray(a)) {
-      console.log(...a);
-    } else {
-      console.log(a);
+export const { $$ } = (function () {
+  const PROCESSES: (() => Promise<void>)[] = [];
+  class $$ {
+    static set p(a: any) {
+      if (Array.isArray(a)) {
+        console.log(...a);
+      } else {
+        console.log(a);
+      }
     }
-  }
-  static get O() {
-    return {
-      vals: Object.values,
-      keys: Object.keys,
-      items: Object.entries,
-      has: Object.hasOwn,
-    };
-  }
-  static makeID(length: number) {
-    let result = "";
-    const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-    const nums = "0123456789";
+    static get O() {
+      return {
+        vals: Object.values,
+        keys: Object.keys,
+        items: Object.entries,
+        has: Object.hasOwn,
+      };
+    }
+    static makeID(length: number) {
+      let result = "";
+      const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+      const nums = "0123456789";
 
-    let counter = 0;
-    while (counter < length) {
-      let chars = characters + (counter == 0 ? "" : nums);
-      const charactersLength = chars.length;
-      result += chars.charAt(Math.floor(Math.random() * charactersLength));
-      counter += 1;
+      let counter = 0;
+      while (counter < length) {
+        let chars = characters + (counter == 0 ? "" : nums);
+        const charactersLength = chars.length;
+        result += chars.charAt(Math.floor(Math.random() * charactersLength));
+        counter += 1;
+      }
+      return result;
     }
-    return result;
+    static process(fn: () => Promise<void>) {
+      PROCESSES.push(fn);
+    }
   }
-}
+
+  process.on("SIGINT", async () => {
+    PROCESSES.forEach(async (fn) => {
+      await fn();
+    });
+    process.exit();
+  });
+
+  process.on("SIGTERM", async () => {
+    PROCESSES.forEach(async (fn) => {
+      await fn();
+    });
+    process.exit();
+  });
+
+  return { $$ };
+})();
 
 const wssClients: dict<dict<repsWSS>> = {};
 export const { response, session, jwt, jwt_refresh, wss } = (function () {
@@ -718,7 +739,7 @@ export const { Aeri, foresight } = (function () {
           FS.request = req;
           const { sid } = this.__reqs(app, req);
           if (sid) {
-            FS.session = app.xsession.openSession(sid);
+            FS.session = await app.xsession.openSession(sid);
           }
 
           // --------
@@ -811,7 +832,7 @@ export const { Aeri, foresight } = (function () {
             if ("session" in req.cookies) {
               sid = req.cookies.session;
             }
-            const sesh = app.xsession.openSession(sid);
+            const sesh = await app.xsession.openSession(sid);
             if (!sesh.new) {
               Object.assign(z_args, { session: true });
             }
@@ -840,7 +861,7 @@ export const { Aeri, foresight } = (function () {
 
             const a_args: dict<boolean> = {};
             const sjwt = app._jwt.open(jwtv, { minutes: 30 });
-            const sesh = !jwtv ? app.xsession.openSession(sid) : null;
+            const sesh = !jwtv ? await app.xsession.openSession(sid) : null;
 
             if (!sjwt.new) {
               a_args["jwt"] = true;
@@ -862,6 +883,11 @@ export const { Aeri, foresight } = (function () {
 
             let CTX = await FS[method](z_args);
             this.headers.push(...(FS.httpHeader as string[][]));
+
+            if (FS.session.modified) {
+              app.xsession.saveSession(FS.session, this);
+            }
+
             if (CTX == null) {
               if (method == "get") {
                 this.status = 401;
@@ -877,12 +903,8 @@ export const { Aeri, foresight } = (function () {
               }
             } else if (CTX instanceof rsx) {
               this.status = CTX.status;
-              this.headers = CTX.headers;
+              this.headers.push(...CTX.headers);
               return null;
-            }
-
-            if (FS.session.modified) {
-              app.xsession.saveSession(FS.session, this);
             }
 
             // ---------------
@@ -971,7 +993,6 @@ export const { Aeri, foresight } = (function () {
       const { parsed, query } = __.parseURL(req.url);
       req.urlQuery = query;
       const ZX = this.Z.get(parsed, false, req.url);
-
       if (res && req.isEventStream) {
         res.writeHead(200, {
           "Content-Type": "text/event-stream",
@@ -985,7 +1006,8 @@ export const { Aeri, foresight } = (function () {
             res.statusCode = 404;
             res.end();
           };
-          if (ctx) {
+
+          if (ZX.headers && ZX.headers.length) {
             const send = (buffed: Buffer, enc: string) => {
               res.setHeader("Content-Length", buffed.byteLength);
               res.setHeader("Content-Encoding", enc);
@@ -1084,6 +1106,7 @@ export const { Aeri, foresight } = (function () {
       CLIENT: null,
       TABLE: "",
     };
+    postgresClient: Client | null = null;
     google = {
       id: "",
       secret: "",
@@ -1091,6 +1114,7 @@ export const { Aeri, foresight } = (function () {
     set sessionInterface(intrfce: "supabase" | "postgres") {
       this.session.INTERFACE = intrfce;
     }
+    //
     get xsession() {
       return new reSession(this as any, this.session, this.secret_key).get(
         this.session.INTERFACE,
@@ -1149,7 +1173,7 @@ export const { Aeri, foresight } = (function () {
         this.Z.folder = pt;
       });
     }
-    redir(url: string) {
+    redirect(url: string) {
       return new rsx(null, 302, [["Location", url]]);
     }
     // ------------------
@@ -1171,7 +1195,6 @@ export const { Aeri, foresight } = (function () {
       // -------------------------------------------
       const { url, method, hostname, port, options } = opt;
       let host = hostname ?? "localhost";
-
       const RN = new runner(this);
       if (url) {
         const Request = new request(url, method!, {});
@@ -1180,7 +1203,6 @@ export const { Aeri, foresight } = (function () {
         // =============
         const sk = process.env.SSL_KEY;
         const sc = process.env.SSL_CERT;
-
         if (sk && sc) {
           const _options = {
             key: readFileSync(sk),
@@ -1232,9 +1254,27 @@ export const { Aeri, foresight } = (function () {
             let sl = `Running ${host}@${port}`;
             console.log(sl);
           });
+
+          if (this.session.INTERFACE == "postgres") {
+            await this.postgresClient?.connect();
+            const query: QueryConfig = {
+              text: `CREATE TABLE IF NOT EXISTS session (
+                      sid TEXT,
+                      data TEXT,
+                      expiration TEXT
+          );`,
+            };
+            await this.postgresClient?.query(query);
+            $$.process(async () => {
+              await this.postgresClient?.end();
+              $$.p = "postgres db connection closed..";
+            });
+          }
           //
         } else {
-          throw Error("SSL_KEY & SSL_CERT path missing in .__/.env file");
+          throw Error(
+            "SSL_KEY & SSL_CERT path missing in Private/.__/.env file",
+          );
         }
       }
     }

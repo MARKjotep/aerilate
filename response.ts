@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import { sign, verify } from "jsonwebtoken";
 import { Aeri } from "./index";
+import { Client } from "pg";
 
 // Types -----------------------
 export interface dict<T> {
@@ -408,17 +409,60 @@ class cSession extends serverInterface {
 }
 
 // --------------
-export class postgreSQLSession extends serverSide {}
+export class postgreSession extends serverSide {}
 
 class postgreSQL extends serverInterface {
-  cacher: cacher;
-  sclass = fSession;
-  constructor(config: sessionConfig, secret: string, cacherpath = ".sessions") {
+  sclass = postgreSession;
+  client: Client;
+  constructor(client: Client, config: sessionConfig, secret: string) {
     super(config, secret);
-    this.cacher = new cacher(cacherpath);
+    this.client = client;
   }
-  fetchSession(sid: string): any {}
-  saveSession(xsesh: serverSide, rsx?: any, deleteMe?: boolean): void {}
+  async fetchSession(sid: string): Promise<typeof this.sclass> {
+    const prefs = this.config.KEY_PREFIX + sid;
+    const itm = await this.client.query({
+      text: "SELECT * FROM session WHERE sid = $1",
+      values: [prefs],
+    });
+    let data = {};
+    if (itm.rows[0] && "sid" in itm.rows[0]) {
+      data = JSON.parse(itm.rows[0].data);
+    }
+    return new this.sclass(sid, this.config.PERMANENT, data).session;
+  }
+  async saveSession(
+    xsesh: serverSide,
+    rsx?: any,
+    deleteMe?: boolean,
+  ): Promise<void> {
+    const prefs = this.config.KEY_PREFIX + xsesh.sid;
+    if (!Object.entries(xsesh.data).length) {
+      if (xsesh.modified || deleteMe) {
+        // this.client.delete().eq("sid", prefs);
+        await this.client.query({
+          text: `DELETE FROM session WHERE sid = $1`,
+          values: [prefs],
+        });
+        if (rsx) {
+          const cookie = this.setCookie(xsesh, 0);
+          rsx.setHeader("Set-Cookie", cookie);
+        }
+      }
+      return;
+    }
+    const life = this.config.LIFETIME;
+    const data = JSON.stringify(xsesh.data);
+
+    if (rsx) {
+      const expre = this.getExpiration(this.config, xsesh);
+      this.client.query({
+        text: `INSERT INTO session(sid, data, expiration) VALUES($1, $2, $3)`,
+        values: [prefs, data, expre ? expre : null],
+      });
+      const cookie = this.setCookie(xsesh, timeDelta(life));
+      rsx.setHeader("Set-Cookie", cookie);
+    }
+  }
 }
 
 // --------------
@@ -445,7 +489,7 @@ class supaBaseSS extends serverInterface {
     const prefs = this.config.KEY_PREFIX + xsesh.sid;
     if (!Object.entries(xsesh.data).length) {
       if (xsesh.modified || deleteMe) {
-        this.client.delete().eq("id", prefs);
+        this.client.delete().eq("sid", prefs);
         if (rsx) {
           const cookie = this.setCookie(xsesh, 0);
           rsx.setHeader("Set-Cookie", cookie);
@@ -460,7 +504,7 @@ class supaBaseSS extends serverInterface {
     if (rsx) {
       const expre = this.getExpiration(this.config, xsesh);
       this.client.upsert({
-        id: prefs,
+        sid: prefs,
         data: data,
         expiration: expre ? expre : null,
       });
@@ -496,6 +540,13 @@ export class reSession {
       }
     } else if (session == "jwt") {
       return new cSession(this.config, this.secret, this.config.JWT_STORAGE);
+    } else if (session == "postgres") {
+      const CLIENT = this.app.postgresClient;
+      if (CLIENT) {
+        try {
+          return new postgreSQL(CLIENT, this.config, this.secret);
+        } catch (e) {}
+      }
     }
 
     return new cSession(this.config, this.secret, this.config.STORAGE);
