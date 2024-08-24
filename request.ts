@@ -268,11 +268,14 @@ export class request {
   wssID = "";
   isEventStream = false;
   auth = "";
+  host = "";
+
   constructor(url: string, method: string, headers: IncomingHttpHeaders) {
     this.headers = headers;
     this.url = url;
     this.method = method.toLowerCase();
     this.__proc;
+    this.host = this.headers[":scheme"] + "://" + this.headers[":authority"];
   }
   get contentType() {
     return this.headers["content-type"];
@@ -399,14 +402,16 @@ export class request {
   }
   get baseURL(): string {
     const urls: string[] = [];
-    let auth = this.headers[":authority"] as string;
-    let _path = this.headers[":path"] as string;
+    let auth = (this.headers[":authority"] as string) ?? "localhost:3000";
+    let _path = (this.headers[":path"] as string) ?? this.url;
+
     urls.push(
-      this.headers[":scheme"] as string,
+      (this.headers[":scheme"] as string) ?? "https",
       "://",
       auth,
       _path.split("?")[0],
     );
+
     return urls.join("");
   }
 }

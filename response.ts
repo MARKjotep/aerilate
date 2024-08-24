@@ -280,10 +280,14 @@ export class serverInterface extends sidGenerator {
     this.config = config;
     this.permanent = config.PERMANENT;
   }
-  setCookie(xsesh: serverSide, life: Date | number) {
+  setCookie(xsesh: serverSide, life: Date | number, _sameSite = "") {
     let sameSite = null;
     if (this.config.COOKIE_SAMESITE) {
       sameSite = this.config.COOKIE_SAMESITE;
+    }
+
+    if (_sameSite) {
+      sameSite = _sameSite;
     }
 
     return cookieDump(this.config.COOKIE_NAME!, xsesh.sid, {
@@ -308,7 +312,12 @@ export class serverInterface extends sidGenerator {
   fetchSession(sid: string) {
     return {};
   }
-  saveSession(xsesh: serverSide, rsx?: any, deleteMe: boolean = false) {
+  saveSession(
+    xsesh: serverSide,
+    rsx?: any,
+    deleteMe: boolean = false,
+    sameSite: string = "",
+  ) {
     return;
   }
   getExpiration(config: sessionConfig, xsesh: serverSide): string | null {
@@ -318,6 +327,12 @@ export class serverInterface extends sidGenerator {
       return now.setDate(now.getDate() + lifet).toString();
     }
     return null;
+  }
+  deleteBrowserSession(xsesh: serverSide, rsx?: any) {
+    if (rsx) {
+      const cookie = this.setCookie(xsesh, 0);
+      rsx.setHeader("Set-Cookie", cookie);
+    }
   }
 }
 
@@ -380,7 +395,12 @@ class cSession extends serverInterface {
     super(config, secret);
     this.cacher = new cacher(cacherpath);
   }
-  saveSession(xsesh: serverSide, rsx?: any, deleteMe: boolean = false) {
+  saveSession(
+    xsesh: serverSide,
+    rsx?: any,
+    deleteMe: boolean = false,
+    sameSite: string = "",
+  ) {
     const prefs = this.config.KEY_PREFIX + xsesh.sid;
     if (!Object.entries(xsesh.data).length) {
       if (xsesh.modified || deleteMe) {
@@ -434,11 +454,12 @@ class postgreSQL extends serverInterface {
     xsesh: serverSide,
     rsx?: any,
     deleteMe?: boolean,
+    sameSite: string = "",
   ): Promise<void> {
     const prefs = this.config.KEY_PREFIX + xsesh.sid;
+
     if (!Object.entries(xsesh.data).length) {
       if (xsesh.modified || deleteMe) {
-        // this.client.delete().eq("sid", prefs);
         await this.client.query({
           text: `DELETE FROM session WHERE sid = $1`,
           values: [prefs],
@@ -459,7 +480,7 @@ class postgreSQL extends serverInterface {
         text: `INSERT INTO session(sid, data, expiration) VALUES($1, $2, $3)`,
         values: [prefs, data, expre ? expre : null],
       });
-      const cookie = this.setCookie(xsesh, timeDelta(life));
+      const cookie = this.setCookie(xsesh, timeDelta(life), sameSite);
       rsx.setHeader("Set-Cookie", cookie);
     }
   }
@@ -485,7 +506,12 @@ class supaBaseSS extends serverInterface {
     }
     return new this.sclass(sid, this.config.PERMANENT, data).session;
   }
-  saveSession(xsesh: serverSide, rsx?: any, deleteMe?: boolean): void {
+  saveSession(
+    xsesh: serverSide,
+    rsx?: any,
+    deleteMe?: boolean,
+    sameSite: string = "",
+  ): void {
     const prefs = this.config.KEY_PREFIX + xsesh.sid;
     if (!Object.entries(xsesh.data).length) {
       if (xsesh.modified || deleteMe) {
@@ -508,7 +534,7 @@ class supaBaseSS extends serverInterface {
         data: data,
         expiration: expre ? expre : null,
       });
-      const cookie = this.setCookie(xsesh, timeDelta(life));
+      const cookie = this.setCookie(xsesh, timeDelta(life), sameSite);
       rsx.setHeader("Set-Cookie", cookie);
     }
   }
@@ -663,5 +689,30 @@ export class _jwt extends sidGenerator {
       delete data["access_token"];
     }
     return this.sign(data);
+  }
+}
+
+export class timedJWT {
+  _xjwt: _jwt | null = null;
+  constructor() {}
+  new(payload: dict<any>) {
+    if (this._xjwt) {
+      return this._xjwt.sign(payload);
+    }
+    return "";
+  }
+  open(
+    token: string,
+    time?: {
+      days?: number;
+      hours?: number;
+      minutes?: number;
+      seconds?: number;
+    },
+  ): dict<string> | null {
+    if (this._xjwt) {
+      return this._xjwt.verify(token, time);
+    }
+    return null;
   }
 }

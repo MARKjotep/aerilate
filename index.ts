@@ -12,6 +12,7 @@ import {
   timeDelta,
   _jwt,
   xjwt,
+  timedJWT,
 } from "./response";
 import { request, strip } from "./request";
 // -----------
@@ -36,7 +37,7 @@ import { Client, QueryConfig } from "pg";
  */
 
 // Types -----------------------
-interface dict<T> {
+export interface dict<T> {
   [Key: string]: T;
 }
 type V = string | number | boolean;
@@ -46,6 +47,7 @@ type meta<T> = {
   "http-equiv"?: T;
   name?: T;
   media?: T;
+  url?: T;
 };
 type link<T> = {
   href?: T;
@@ -97,6 +99,7 @@ interface sbase {
   CLIENT: SupabaseClient | null;
   TABLE: string;
 }
+interface urlcfg {}
 
 // ----------------------------
 
@@ -132,6 +135,21 @@ export const { $$ } = (function () {
       }
       return result;
     }
+    static makeID2(length: number) {
+      let result = "";
+      const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+      const nums = "0123456789~!@#$%^()_+|-";
+
+      let counter = 0;
+      while (counter < length) {
+        let chars = characters + (counter == 0 ? "" : nums);
+
+        const charactersLength = chars.length;
+        result += chars.charAt(Math.floor(Math.random() * charactersLength));
+        counter += 1;
+      }
+      return result;
+    }
     static process(fn: () => Promise<void>) {
       PROCESSES.push(fn);
     }
@@ -155,169 +173,177 @@ export const { $$ } = (function () {
 })();
 
 const wssClients: dict<dict<repsWSS>> = {};
-export const { response, session, jwt, jwt_refresh, wss } = (function () {
-  class eStream {
-    res: Http2ServerResponse | null = null;
-    is: ServerHttp2Stream | null = null;
-    push({
-      id,
-      event,
-      data,
-      retry,
-      end,
-    }: {
-      id: string | number;
-      event: string;
-      data: string | dict<string>;
-      retry?: number;
-      end?: boolean;
-    }) {
-      const res = this.res;
-      if (res) {
-        if (retry) {
-          res.write(`retry: ${retry}\n`);
-        }
-        res.write(`id: ${id}\n`);
-        res.write(`event: ${event}\n`);
-        if (typeof data == "object") {
-          res.write("data: " + JSON.stringify(data) + "\n\n");
-        } else {
-          res.write("data: " + data + "\n\n");
-        }
-        if (end) {
-          res.write(`end`);
-        }
-      }
-    }
-  }
-  class response {
-    session = new fSession().session;
-    request = new request("", "", {});
-    _headattr: any = {};
-    lang: string = "en";
-    httpHeader: string[][] = [];
-    stream = new eStream();
-    jwt = new xjwt().jwt;
-    async get(...args: any[]): Promise<any> {}
-    async post(...args: any[]): Promise<any> {}
-    async put(...args: any[]): Promise<any> {}
-    async patch(...args: any[]): Promise<any> {}
-    async error(...args: any[]): Promise<any> {}
-    async eventStream(...args: any[]): Promise<any> {}
-    set head(heads: headP) {
-      $$.O.items(heads).forEach(([k, v]) => {
-        if (k == "title" || k == "base") {
-          this._headattr[k] = v;
-        } else {
-          if (!(k in this._headattr)) {
-            this._headattr[k] = v;
+export const { response, session, auth_bearer, jwt, jwt_refresh, wss } =
+  (function () {
+    class eStream {
+      res: Http2ServerResponse | null = null;
+      is: ServerHttp2Stream | null = null;
+      push({
+        id,
+        event,
+        data,
+        retry,
+        end,
+      }: {
+        id: string | number;
+        event: string;
+        data: string | dict<string>;
+        retry?: number;
+        end?: boolean;
+      }) {
+        const res = this.res;
+        if (res) {
+          if (retry) {
+            res.write(`retry: ${retry}\n`);
+          }
+          res.write(`id: ${id}\n`);
+          res.write(`event: ${event}\n`);
+          if (typeof data == "object") {
+            res.write("data: " + JSON.stringify(data) + "\n\n");
           } else {
-            this._headattr[k].push(...v);
+            res.write("data: " + data + "\n\n");
+          }
+          if (end) {
+            res.write(`end`);
           }
         }
-      });
-    }
-    setHTTPHeader(headr: string[]) {
-      this.httpHeader.push(headr);
-    }
-    setCookie(key: string, val: string, path: string = "/", days: number = 31) {
-      const cd = cookieDump(key, val, {
-        expires: timeDelta(days),
-        path: path,
-        httpOnly: true,
-        sameSite: "Strict",
-      });
-      this.setHTTPHeader(["Set-Cookie", cd]);
-    }
-    deleteCookie(key: string) {
-      this.setCookie(key, "", "/", 0);
-    }
-    get wssClients() {
-      return $$.O.keys(wssClients);
-    }
-  }
-  function session(...itm: any[]) {
-    const [a, b, c] = itm;
-    const OG: () => any = c.value;
-    c.value = function (args: any = {}) {
-      if ("session" in args && args.session) {
-        return OG.apply(this, args);
-      }
-      return null;
-    };
-    return c;
-  }
-  function jwt(...itm: any[]) {
-    const [a, b, c] = itm;
-    const OG: () => any = c.value;
-    c.value = function (args: any = {}) {
-      if ("jwt" in args) {
-        return OG.apply(this, args);
-      }
-      return null;
-    };
-    return c;
-  }
-  function jwt_refresh(...itm: any[]) {
-    const [a, b, c] = itm;
-    const OG: () => any = c.value;
-    c.value = function (args: any = {}) {
-      if ("jwt_refresh" in args) {
-        return OG.apply(this, args);
-      }
-      return null;
-    };
-    return c;
-  }
-  class wss {
-    session = new fSession().session;
-    socket: null | WebSocket;
-    request = new request("", "", {});
-    data: dict<V> = {};
-    wid: string = "";
-    wssURL: string = "";
-    role: "maker" | "joiner" | "alien" = "joiner";
-    constructor(...args: any[]) {
-      this.socket = null;
-    }
-    async init(...args: any[]) {}
-    async onConnect(message?: string) {
-      this.send = "connected!";
-    }
-    async onMessage(message?: string) {}
-    async onClose(message?: string) {}
-    set send(message: string | object) {
-      if (this.socket) {
-        if (typeof message == "object") {
-          this.socket.send(JSON.stringify(message));
-        } else {
-          this.socket.send(message);
-        }
       }
     }
-    set broadcast(message: string | object) {
-      if (this.socket) {
-        let mess: string = "";
-        if (typeof message == "object") {
-          mess = JSON.stringify(message);
-        } else {
-          mess = message;
-        }
-        $$.O.items(wssClients[this.wssURL]).forEach(([mid, wsx]) => {
-          wsx.WSS.onMessage(mess);
+    class response {
+      session = new fSession().session;
+      request = new request("", "", {});
+      _headattr: any = {};
+      lang: string = "en";
+      httpHeader: string[][] = [];
+      stream = new eStream();
+      jwt = new xjwt().jwt;
+      timedJWT = new timedJWT();
+      sameSite: "Lax" | null = null;
+      async get(...args: any[]): Promise<any> {}
+      async post(...args: any[]): Promise<any> {}
+      async put(...args: any[]): Promise<any> {}
+      async patch(...args: any[]): Promise<any> {}
+      async error(...args: any[]): Promise<any> {}
+      async eventStream(...args: any[]): Promise<any> {}
+      set head(heads: headP) {
+        $$.O.items(heads).forEach(([k, v]) => {
+          if (k == "title" || k == "base") {
+            this._headattr[k] = v;
+          } else {
+            if (!(k in this._headattr)) {
+              this._headattr[k] = v;
+            } else {
+              this._headattr[k].push(...v);
+            }
+          }
         });
       }
+      setHTTPHeader(headr: string[]) {
+        this.httpHeader.push(headr);
+      }
+      setCookie(
+        key: string,
+        val: string,
+        path: string = "/",
+        days: number = 31,
+      ) {
+        const cd = cookieDump(key, val, {
+          expires: timeDelta(days),
+          path: path,
+          httpOnly: true,
+          sameSite: "Strict",
+        });
+        this.setHTTPHeader(["Set-Cookie", cd]);
+      }
+      deleteCookie(key: string) {
+        this.setCookie(key, "", "/", 0);
+      }
+      get wssClients() {
+        return $$.O.keys(wssClients);
+      }
     }
-    get close() {
-      if (this.socket) this.socket.close();
-      return;
+    function session(...itm: any[]) {
+      const [a, b, c] = itm;
+      const OG: () => any = c.value;
+      c.value = function (args: any = {}) {
+        if ("session" in args && args.session) {
+          return OG.apply(this, args);
+        }
+        return null;
+      };
+      return c;
     }
-  }
+    function jwt(...itm: any[]) {
+      const [a, b, c] = itm;
+      const OG: () => any = c.value;
+      c.value = function (args: any = {}) {
+        if ("jwt" in args) {
+          return OG.apply(this, args);
+        }
+        return null;
+      };
+      return c;
+    }
+    function jwt_refresh(...itm: any[]) {
+      const [a, b, c] = itm;
+      const OG: () => any = c.value;
+      c.value = function (args: any = {}) {
+        if ("jwt_refresh" in args) {
+          return OG.apply(this, args);
+        }
+        return null;
+      };
+      return c;
+    }
+    class wss {
+      session = new fSession().session;
+      socket: null | WebSocket;
+      request = new request("", "", {});
+      data: dict<V> = {};
+      wid: string = "";
+      wssURL: string = "";
+      role: "maker" | "joiner" | "alien" = "joiner";
+      constructor(...args: any[]) {
+        this.socket = null;
+      }
+      async init(...args: any[]) {}
+      async onConnect(message?: string) {
+        this.send = "connected!";
+      }
+      async onMessage(message?: string) {}
+      async onClose(message?: string) {}
+      set send(message: string | object) {
+        if (this.socket) {
+          if (typeof message == "object") {
+            this.socket.send(JSON.stringify(message));
+          } else {
+            this.socket.send(message);
+          }
+        }
+      }
+      set broadcast(message: string | object) {
+        if (this.socket) {
+          let mess: string = "";
+          if (typeof message == "object") {
+            mess = JSON.stringify(message);
+          } else {
+            mess = message;
+          }
+          $$.O.items(wssClients[this.wssURL]).forEach(([mid, wsx]) => {
+            wsx.WSS.onMessage(mess);
+          });
+        }
+      }
+      get close() {
+        if (this.socket) this.socket.close();
+        return;
+      }
+    }
 
-  // -- Google Auth
-
-  return { response, session, jwt, jwt_refresh, wss };
-})();
+    // auth_bearer
+    // -- Google Auth
+    return { response, session, auth_bearer: jwt, jwt, jwt_refresh, wss };
+  })();
 export const { Aeri, foresight } = (function () {
   class __ {
     static makeID(length: number) {
@@ -337,8 +363,18 @@ export const { Aeri, foresight } = (function () {
     static parseURL(url: string) {
       const parsed: string[] = [];
       const args: string[] = [];
-      const prsed = url.match(/(?<=\/)[^/].*?(?=\/|$)/g) ?? ["/"];
+
+      let murl = url;
+      let qurl = "";
+      const splitd = url.match(/(?<=\?)[^/].*=?(?=\/|$)/g);
+      if (splitd?.[0]) {
+        qurl = splitd?.[0];
+        murl = url.slice(0, url.indexOf(qurl) - 1);
+      }
+
+      const prsed = murl.match(/(?<=\/)[^/].*?(?=\/|$)/g) ?? ["/"];
       const query: dict<string> = {};
+
       prsed?.forEach((pr) => {
         if (pr.indexOf("<") >= 0) {
           const tgp = pr.match(/(?<=<)[^/].*?(?=>|$)/g);
@@ -356,21 +392,15 @@ export const { Aeri, foresight } = (function () {
         parsed.push("/");
       }
 
-      const lval = parsed.pop();
-      if (lval) {
-        if (lval?.indexOf("?") > 0) {
-          const [xurl, qstr] = lval.split(/\?(.*)/, 2);
-          const _qq = decodeURIComponent(qstr);
-          const _qstr = _qq.split("&");
-          _qstr.forEach((qs) => {
-            const [ak, av] = qs.split(/\=(.*)/, 2);
-            query[ak] = av;
-          });
-          parsed.push(xurl);
-        } else {
-          parsed.push(lval);
-        }
+      if (qurl) {
+        const _qq = decodeURIComponent(qurl);
+        const _qstr = _qq.split("&");
+        _qstr.forEach((qs) => {
+          const [ak, av] = qs.split(/\=(.*)/, 2);
+          query[ak] = av;
+        });
       }
+
       return { parsed, args, query };
     }
     static is_number(value: any) {
@@ -531,10 +561,13 @@ export const { Aeri, foresight } = (function () {
     mtype: string;
     broadcastWSS = false;
     maxClient: number | null = null;
+    withSession: boolean = false;
+
     constructor(
       url: string,
       cname: typeof response | typeof wss | null = null,
       isFile: boolean = false,
+      session: boolean = false,
     ) {
       this.url = url;
       this.rurl = url;
@@ -545,6 +578,7 @@ export const { Aeri, foresight } = (function () {
       this.isFile = isFile;
       this.mtype = "";
       if (isFile) {
+        this.withSession = session;
         this.mtype = __.mimeType(url);
       }
     }
@@ -679,6 +713,7 @@ export const { Aeri, foresight } = (function () {
         const fsx = readFileSync(url);
         if (fsx) {
           this.setHeader("Cache-Control", "max-age=31536000");
+
           if (range) {
             const fssize = fsx.byteLength;
             const rg = rBytes.exec(range);
@@ -710,19 +745,22 @@ export const { Aeri, foresight } = (function () {
       }
       return null;
     }
-    __reqs(app: Aeri, req: request) {
+    async __reqs(app: Aeri, req: request) {
       let sid = "";
       let jwtv = "";
       let refreshjwt: any | null = null;
 
       if ("session" in req.cookies) {
+        // Include the samesite
         sid = req.cookies.session;
       }
       if (req.auth) {
         jwtv = req.auth;
       }
       if ("refresh_token" in req.urlEncoded) {
-        refreshjwt = app.jwtsession.openSession(req.urlEncoded.refresh_token);
+        refreshjwt = await app.jwtsession.openSession(
+          req.urlEncoded.refresh_token,
+        );
       }
 
       return { sid, jwtv, refreshjwt };
@@ -737,7 +775,7 @@ export const { Aeri, foresight } = (function () {
           FS.socket = _wss;
           FS.wssURL = rurl;
           FS.request = req;
-          const { sid } = this.__reqs(app, req);
+          const { sid } = await this.__reqs(app, req);
           if (sid) {
             FS.session = await app.xsession.openSession(sid);
           }
@@ -847,21 +885,29 @@ export const { Aeri, foresight } = (function () {
       req: request,
     ): Promise<string | Buffer | null> {
       if (this.furl) {
-        const { f, url, x_args, y_args, isFile, mtype } = this.furl;
+        const { f, url, x_args, y_args, isFile, mtype, withSession } =
+          this.furl;
         if (isFile) {
+          if (withSession) {
+            const { sid } = await this.__reqs(app, req);
+            const sesh = await app.xsession.openSession(sid);
+            if (sesh.new) {
+              // Return null if the session is new. Means it's not valid request
+              this.status = 401;
+              return null;
+            }
+          }
           const byteR = req.headers.range;
           return this.file(url, mtype, byteR);
         } else if (f) {
           const FS: any = new f();
-
           if (typeof FS[method] == "function") {
             const z_args = __.args(x_args, y_args);
-
-            const { sid, jwtv, refreshjwt } = this.__reqs(app, req);
-
+            const { sid, jwtv, refreshjwt } = await this.__reqs(app, req);
             const a_args: dict<boolean> = {};
             const sjwt = app._jwt.open(jwtv, { minutes: 30 });
-            const sesh = !jwtv ? await app.xsession.openSession(sid) : null;
+            const sesh = await app.xsession.openSession(sid);
+            FS.timedJWT._xjwt = app._jwt;
 
             if (!sjwt.new) {
               a_args["jwt"] = true;
@@ -873,6 +919,7 @@ export const { Aeri, foresight } = (function () {
             if ($$.O.keys(a_args).length) {
               Object.assign(z_args, a_args);
             }
+
             Object.assign(FS, {
               request: req,
               session: sesh,
@@ -884,9 +931,17 @@ export const { Aeri, foresight } = (function () {
             let CTX = await FS[method](z_args);
             this.headers.push(...(FS.httpHeader as string[][]));
 
-            if (FS.session.modified) {
-              app.xsession.saveSession(FS.session, this);
-            }
+            if (FS.session)
+              if (FS.session.modified) {
+                await app.xsession.saveSession(
+                  FS.session,
+                  this,
+                  false,
+                  FS.sameSite,
+                );
+              } else if (sesh && sid && sesh.new) {
+                app.xsession.deleteBrowserSession(FS.session, this);
+              }
 
             if (CTX == null) {
               if (method == "get") {
@@ -904,6 +959,8 @@ export const { Aeri, foresight } = (function () {
             } else if (CTX instanceof rsx) {
               this.status = CTX.status;
               this.headers.push(...CTX.headers);
+
+              // ----
               return null;
             }
 
@@ -916,7 +973,7 @@ export const { Aeri, foresight } = (function () {
               ).html(CTX);
               this.setTL("text/html");
               return htx;
-            } else if (method == "post") {
+            } else if (method == "post" || method == "put") {
               let STJ = "{}";
               if (CTX instanceof xjwt) {
                 if (refreshjwt) {
@@ -925,14 +982,14 @@ export const { Aeri, foresight } = (function () {
                     if (app._jwt.verify(atk, { days: 5 })) {
                       const fjwt = app._jwt.save(refreshjwt);
                       refreshjwt.access_token = fjwt;
-                      app.jwtsession.saveSession(refreshjwt);
+                      await app.jwtsession.saveSession(refreshjwt);
                       STJ = JSON.stringify({
                         access_token: fjwt,
                         refresh_token: refreshjwt.sid,
                         status: "ok",
                       });
                     } else {
-                      app.jwtsession.saveSession(refreshjwt, null, true);
+                      await app.jwtsession.saveSession(refreshjwt, null, true);
                       STJ = JSON.stringify({
                         error: "expired or invald refresh_token provided",
                       });
@@ -947,7 +1004,7 @@ export const { Aeri, foresight } = (function () {
                   const fjwt = app._jwt.save(FS.jwt);
                   const axjwt = FS.jwt.sid;
                   FS.jwt.access_token = fjwt;
-                  app.jwtsession.saveSession(FS.jwt);
+                  await app.jwtsession.saveSession(FS.jwt);
                   STJ = JSON.stringify({
                     access_token: fjwt,
                     refresh_token: axjwt,
@@ -992,7 +1049,9 @@ export const { Aeri, foresight } = (function () {
     async render(req: request, res?: Http2ServerResponse) {
       const { parsed, query } = __.parseURL(req.url);
       req.urlQuery = query;
+
       const ZX = this.Z.get(parsed, false, req.url);
+
       if (res && req.isEventStream) {
         res.writeHead(200, {
           "Content-Type": "text/event-stream",
@@ -1003,7 +1062,7 @@ export const { Aeri, foresight } = (function () {
         const ctx = await ZX.response(req.method, this.app, req);
         if (res) {
           const errs = () => {
-            res.statusCode = 404;
+            res.statusCode = ZX.status;
             res.end();
           };
 
@@ -1060,6 +1119,7 @@ export const { Aeri, foresight } = (function () {
   };
 
   class _c {
+    secret_key: string = $$.makeID(10);
     constructor(dir: string, env_path: string = "") {
       const PRIV = dir + "/private/";
 
@@ -1074,11 +1134,9 @@ export const { Aeri, foresight } = (function () {
       //
       const sk = process.env.SECRET;
       if (sk) this.secret_key = sk;
-
       this.session.STORAGE = PRIV + ".sessions";
       this.session.JWT_STORAGE = PRIV + ".jwtsessions";
     }
-    secret_key: string = $$.makeID(10);
     config = {
       APPLICATION_ROOT: "/",
       CSRF_TIME_LIMIT: 600,
@@ -1137,9 +1195,9 @@ export const { Aeri, foresight } = (function () {
       this.Z = new zURL(__.makeID(15));
       this._jwt = new _jwt(this.secret_key);
     }
-    url(url: string) {
+    url(url: string, option?: urlcfg) {
       const ins = (f: typeof response) => {
-        this.Z.z = new fURL(url, f);
+        this.Z.z = new fURL(url, f, false, false);
         return f;
       };
       return ins;
@@ -1161,8 +1219,8 @@ export const { Aeri, foresight } = (function () {
       };
       return ins;
     }
-    file(furl: string, _session: boolean = false) {
-      this.Z.z = new fURL(furl, null, true);
+    file(furl: string, session: boolean = false) {
+      this.Z.z = new fURL(furl, null, true, session);
       return furl;
     }
     folder(path: string) {
@@ -1272,9 +1330,7 @@ export const { Aeri, foresight } = (function () {
           }
           //
         } else {
-          throw Error(
-            "SSL_KEY & SSL_CERT path missing in Private/.__/.env file",
-          );
+          throw Error("SSL_KEY & SSL_CERT path missing in private/.env file");
         }
       }
     }
@@ -1305,6 +1361,7 @@ export const { GOAT } = (function () {
     given_name = "";
     family_name = "";
     locale = "en";
+    access_token = "";
     constructor(user: dict<string>) {
       if (user) {
         const {
@@ -1315,6 +1372,7 @@ export const { GOAT } = (function () {
           given_name,
           family_name,
           locale,
+          access_token,
         } = user;
         this.verified = Boolean(email_verified);
         this.unique_id = sub;
@@ -1323,6 +1381,7 @@ export const { GOAT } = (function () {
         this.given_name = given_name;
         this.family_name = family_name;
         this.locale = locale;
+        this.access_token = access_token;
       }
     }
   }
@@ -1331,9 +1390,7 @@ export const { GOAT } = (function () {
     id: string;
     secret: string;
     cfg: dict<any> | null;
-    constructor(id: string, secret: string) {
-      this.id = "";
-      this.secret = "";
+    constructor() {
       const { GOOGLE_ID, GOOGLE_SECRET } = process.env;
       this.id = GOOGLE_ID ?? "";
       this.secret = GOOGLE_SECRET ?? "";
@@ -1351,30 +1408,34 @@ export const { GOAT } = (function () {
           return data;
         });
     }
-    async requestURI(baseURL: string, callbackURL: string = "/callback") {
-      if (!this.cfg) {
-        const xcf = await this.cfgs;
-        this.cfg = xcf;
-      }
-      const { authorization_endpoint } = this.cfg!;
 
+    async requestURI(baseURL: string, callbackURL: string = "/callback") {
+      const bcall =
+        baseURL.endsWith("/") && callbackURL.startsWith("/")
+          ? baseURL + callbackURL.slice(1)
+          : baseURL + callbackURL;
+
+      const auth_end = "https://accounts.google.com/o/oauth2/v2/auth";
       const xurl = [
-        authorization_endpoint,
+        auth_end,
         "?response_type=code&",
         "client_id=",
         encodeURIComponent(this.id),
         "&redirect_uri=",
-        encodeURIComponent(`${baseURL}${callbackURL}`),
+        encodeURIComponent(`${bcall}`),
         "&scope=openid+email+profile",
+        "&state=" + encodeURIComponent($$.makeID2(25)),
       ];
+
       return xurl.join("");
     }
-    async userInfo(baseURL: string, code: string) {
+
+    async getToken(baseURL: string, code: string): Promise<string> {
       if (!this.cfg) {
         const xcf = await this.cfgs;
         this.cfg = xcf;
       }
-      const { token_endpoint, userinfo_endpoint } = this.cfg!;
+      const { token_endpoint } = this.cfg!;
       const data = new URLSearchParams({
         grant_type: "authorization_code", // Custom parameter name-value pairs
         client_id: this.id,
@@ -1382,9 +1443,9 @@ export const { GOAT } = (function () {
         code: code,
         redirect_uri: baseURL,
       });
+      //
 
-      let access_tok: string | null = null;
-      await fetch(token_endpoint, {
+      return await fetch(token_endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: data,
@@ -1392,21 +1453,25 @@ export const { GOAT } = (function () {
         .then((resp) => {
           return resp.json();
         })
-        .then((datas) => {
-          access_tok = datas.access_token;
-        });
+        .then((datas) => datas.access_token);
+    }
+    async userInfo(access_token: string) {
+      if (!this.cfg) {
+        const xcf = await this.cfgs;
+        this.cfg = xcf;
+      }
+      const { userinfo_endpoint } = this.cfg!;
 
       let userinf: dict<any> = {};
-      if (access_tok) {
-        await fetch(userinfo_endpoint, {
-          headers: { Authorization: `Bearer ${access_tok}` },
-        })
-          .then((resp) => resp.json())
-          .then((datas) => {
-            userinf = datas;
-          });
-      }
+      await fetch(userinfo_endpoint, {
+        headers: { Authorization: `Bearer ${access_token}` },
+      })
+        .then((resp) => resp.json())
+        .then((datas) => {
+          userinf = datas;
+        });
 
+      Object.assign(userinf, { access_token });
       return new G_USER(userinf);
     }
   }
