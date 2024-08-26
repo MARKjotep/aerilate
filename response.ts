@@ -694,21 +694,21 @@ export class _jwt extends sidGenerator {
 
 export class timedJWT {
   _xjwt: _jwt | null = null;
-  constructor() {}
   new(payload: dict<any>) {
     if (this._xjwt) {
       return this._xjwt.sign(payload);
     }
     return "";
   }
+  //15
   open(
     token: string,
-    time?: {
+    time: {
       days?: number;
       hours?: number;
       minutes?: number;
       seconds?: number;
-    },
+    } = { minutes: 15 },
   ): dict<string> | null {
     if (this._xjwt) {
       return this._xjwt.verify(token, time);

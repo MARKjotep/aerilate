@@ -150,6 +150,27 @@ export const { $$ } = (function () {
       }
       return result;
     }
+    static makeUUID() {
+      let result = "";
+      const characters = "abcdef";
+      const nums = "0123456789";
+
+      const dashIndex = [8, 13, 18, 23];
+      let counter = 0;
+      while (counter < 36) {
+        let chars = characters + (counter == 0 ? "" : nums);
+        const charactersLength = chars.length;
+        if (dashIndex.includes(counter)) {
+          result += "-";
+        } else {
+          result += chars.charAt(Math.floor(Math.random() * charactersLength));
+        }
+
+        counter += 1;
+      }
+      return result;
+    }
+
     static process(fn: () => Promise<void>) {
       PROCESSES.push(fn);
     }
@@ -408,7 +429,6 @@ export const { Aeri, foresight } = (function () {
     }
     static type(wrd: string, isFinal: boolean = false) {
       let lit_type: [any, string] | [] = [];
-
       if (this.is_number(wrd)) {
         const nm = Number(wrd);
         if (Number.isInteger(nm)) {
@@ -421,8 +441,13 @@ export const { Aeri, foresight } = (function () {
           lit_type = [wrd, "file"];
         } else {
           let tps = "-";
-          if (wrd.length >= 36) {
-            tps = "uuid";
+          if (wrd.length == 36) {
+            const dashy = wrd.match(/\-/g);
+            if (dashy && dashy.length == 4) {
+              tps = "uuid";
+            } else {
+              tps = "string";
+            }
           } else if (wrd != "/") {
             tps = "string";
           }
