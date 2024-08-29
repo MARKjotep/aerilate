@@ -170,6 +170,18 @@ export const { $$ } = (function () {
       }
       return result;
     }
+    static make6D(length: number = 6) {
+      let result = "";
+      const nums = "0123456789";
+      let counter = 0;
+      while (counter < length) {
+        let chars = nums;
+        const charactersLength = chars.length;
+        result += chars.charAt(Math.floor(Math.random() * charactersLength));
+        counter += 1;
+      }
+      return result;
+    }
 
     static process(fn: () => Promise<void>) {
       PROCESSES.push(fn);
