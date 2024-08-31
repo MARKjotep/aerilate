@@ -4,7 +4,8 @@ import {
   ServerHttp2Stream,
 } from "node:http2";
 import zlib from "node:zlib";
-import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { writeFileSync, statSync, mkdirSync } from "node:fs";
+import { promises as fr } from "node:fs";
 import {
   reSession,
   fSession,
@@ -13,6 +14,7 @@ import {
   _jwt,
   xjwt,
   timedJWT,
+  serverInterface,
 } from "./response";
 import { request, strip } from "./request";
 // -----------
@@ -77,6 +79,7 @@ type script<T> = {
   type?: "text/javascript" | T;
   id?: T;
   importmap?: impmap;
+  body?: T;
 };
 type base = {
   href?: string;
@@ -90,6 +93,14 @@ interface headP {
   script?: script<V>[];
 }
 
+export interface sesh_db {
+  sid: string;
+  data: string;
+  expiration: string;
+  f_timed?: number;
+  [key: string]: string | undefined | boolean | number;
+}
+
 interface repsWSS {
   WSS: InstanceType<typeof wss>;
   role: "maker" | "joiner";
@@ -99,7 +110,6 @@ interface sbase {
   CLIENT: SupabaseClient | null;
   TABLE: string;
 }
-interface urlcfg {}
 
 // ----------------------------
 
@@ -182,6 +192,12 @@ export const { $$ } = (function () {
       }
       return result;
     }
+    static isExpired(datestr: string, minutes: number = 15) {
+      const xpire = parseInt(datestr);
+      const xdate = new Date(xpire);
+      xdate.setMinutes(xdate.getMinutes() + minutes);
+      return !(xdate.getTime() > new Date().getTime());
+    }
 
     static process(fn: () => Promise<void>) {
       PROCESSES.push(fn);
@@ -243,8 +259,9 @@ export const { response, session, auth_bearer, jwt, jwt_refresh, wss } =
       }
     }
     class response {
+      status: number | null = null;
       session = new fSession().session;
-      request = new request("", "", {});
+      request = new request("", "", {}, "");
       _headattr: any = {};
       lang: string = "en";
       httpHeader: string[][] = [];
@@ -297,10 +314,12 @@ export const { response, session, auth_bearer, jwt, jwt_refresh, wss } =
     }
     function session(...itm: any[]) {
       const [a, b, c] = itm;
+
       const OG: () => any = c.value;
       c.value = function (args: any = {}) {
         if ("session" in args && args.session) {
-          return OG.apply(this, args);
+          const nms: any = [args];
+          return OG.apply(this, nms);
         }
         return null;
       };
@@ -311,7 +330,8 @@ export const { response, session, auth_bearer, jwt, jwt_refresh, wss } =
       const OG: () => any = c.value;
       c.value = function (args: any = {}) {
         if ("jwt" in args) {
-          return OG.apply(this, args);
+          const nms: any = [args];
+          return OG.apply(this, nms);
         }
         return null;
       };
@@ -322,7 +342,8 @@ export const { response, session, auth_bearer, jwt, jwt_refresh, wss } =
       const OG: () => any = c.value;
       c.value = function (args: any = {}) {
         if ("jwt_refresh" in args) {
-          return OG.apply(this, args);
+          const nms: any = [args];
+          return OG.apply(this, nms);
         }
         return null;
       };
@@ -331,7 +352,7 @@ export const { response, session, auth_bearer, jwt, jwt_refresh, wss } =
     class wss {
       session = new fSession().session;
       socket: null | WebSocket;
-      request = new request("", "", {});
+      request = new request("", "", {}, "");
       data: dict<V> = {};
       wid: string = "";
       wssURL: string = "";
@@ -487,7 +508,6 @@ export const { Aeri, foresight } = (function () {
           } else if (Array.isArray(vv)) {
             const rdced = vv.reduce((prv, vl) => {
               let ender = "";
-
               if (kk == "script") {
                 let scrptbdy = "";
                 if ("importmap" in vl) {
@@ -495,8 +515,10 @@ export const { Aeri, foresight } = (function () {
                   scrptbdy = JSON.stringify(vl.importmap);
                   delete vl.importmap;
                   //
+                } else if ("body" in vl) {
+                  scrptbdy = vl.body;
+                  delete vl.body;
                 }
-
                 ender = `${scrptbdy}</${kk}>`;
               }
               prv.push(`<${kk}${__.attr(vl)}>${ender}`);
@@ -744,12 +766,11 @@ export const { Aeri, foresight } = (function () {
     setHeader(name: string, val: string) {
       this.headers.push([name, val]);
     }
-    file(url: string, mtype: string, range?: string) {
+    async file(url: string, mtype: string, range?: string) {
       try {
-        const fsx = readFileSync(url);
+        const fsx = await fr.readFile(url);
         if (fsx) {
           this.setHeader("Cache-Control", "max-age=31536000");
-
           if (range) {
             const fssize = fsx.byteLength;
             const rg = rBytes.exec(range);
@@ -769,7 +790,6 @@ export const { Aeri, foresight } = (function () {
 
               this.setTL(mtype);
               return fsx.subarray(byte1, byte2);
-              // Return the Buffered chunk
             }
           } else {
             this.setTL(mtype);
@@ -813,7 +833,7 @@ export const { Aeri, foresight } = (function () {
           FS.request = req;
           const { sid } = await this.__reqs(app, req);
           if (sid) {
-            FS.session = await app.xsession.openSession(sid);
+            FS.session = await app.XS.openSession(sid);
           }
 
           // --------
@@ -906,7 +926,7 @@ export const { Aeri, foresight } = (function () {
             if ("session" in req.cookies) {
               sid = req.cookies.session;
             }
-            const sesh = await app.xsession.openSession(sid);
+            const sesh = await app.XS.openSession(sid);
             if (!sesh.new) {
               Object.assign(z_args, { session: true });
             }
@@ -926,15 +946,14 @@ export const { Aeri, foresight } = (function () {
         if (isFile) {
           if (withSession) {
             const { sid } = await this.__reqs(app, req);
-            const sesh = await app.xsession.openSession(sid);
+            const sesh = await app.XS.openSession(sid);
             if (sesh.new) {
-              // Return null if the session is new. Means it's not valid request
-              this.status = 401;
+              this.status = 403;
               return null;
             }
           }
           const byteR = req.headers.range;
-          return this.file(url, mtype, byteR);
+          return await this.file(url, mtype, byteR);
         } else if (f) {
           const FS: any = new f();
           if (typeof FS[method] == "function") {
@@ -942,7 +961,7 @@ export const { Aeri, foresight } = (function () {
             const { sid, jwtv, refreshjwt } = await this.__reqs(app, req);
             const a_args: dict<boolean> = {};
             const sjwt = app._jwt.open(jwtv, { minutes: 30 });
-            const sesh = await app.xsession.openSession(sid);
+            const sesh = await app.XS.openSession(sid);
             FS.timedJWT._xjwt = app._jwt;
 
             if (!sjwt.new) {
@@ -967,35 +986,29 @@ export const { Aeri, foresight } = (function () {
             let CTX = await FS[method](z_args);
             this.headers.push(...(FS.httpHeader as string[][]));
 
-            if (FS.session)
+            if (FS.session) {
               if (FS.session.modified) {
-                await app.xsession.saveSession(
-                  FS.session,
-                  this,
-                  false,
-                  FS.sameSite,
-                );
+                await app.XS.saveSession(FS.session, this, false, FS.sameSite);
               } else if (sesh && sid && sesh.new) {
-                app.xsession.deleteBrowserSession(FS.session, this);
+                app.XS.deleteBrowserSession(FS.session, this);
               }
+            }
 
             if (CTX == null) {
               if (method == "get") {
                 this.status = 401;
                 return null;
               } else if (method == "post") {
-                let nst = { error: "not found" };
+                this.status = 404;
                 if (jwtv && sjwt.new) {
-                  nst = { error: "Authorization" };
+                  this.status = 401;
                 }
-                let xnst = JSON.stringify(nst);
-                this.setTL("application/json");
-                return xnst;
+                if (FS.status) this.status = FS.status;
+                return null;
               }
             } else if (CTX instanceof rsx) {
               this.status = CTX.status;
               this.headers.push(...CTX.headers);
-
               // ----
               return null;
             }
@@ -1009,9 +1022,13 @@ export const { Aeri, foresight } = (function () {
               ).html(CTX);
               this.setTL("text/html");
               return htx;
-            } else if (method == "post" || method == "put") {
-              let STJ = "{}";
+            } else {
+              let STJ = "";
+              let _type = "text/plain";
+              if (FS.status) this.status = FS.status;
+              //
               if (CTX instanceof xjwt) {
+                _type = "application/json";
                 if (refreshjwt) {
                   const atk = refreshjwt.data.access_token;
                   if (jwtv == atk) {
@@ -1048,15 +1065,19 @@ export const { Aeri, foresight } = (function () {
                   });
                 }
               } else if (typeof CTX == "object") {
+                _type = "application/json";
                 STJ = JSON.stringify(CTX);
+              } else {
+                STJ = String(CTX);
               }
-              this.setTL("application/json");
+              this.setTL(_type);
               return STJ;
             }
+          } else {
+            this.status = 405;
+            return null;
           }
         }
-      } else {
-        // Check if file and folder
       }
       return null;
     }
@@ -1085,9 +1106,7 @@ export const { Aeri, foresight } = (function () {
     async render(req: request, res?: Http2ServerResponse) {
       const { parsed, query } = __.parseURL(req.url);
       req.urlQuery = query;
-
       const ZX = this.Z.get(parsed, false, req.url);
-
       if (res && req.isEventStream) {
         res.writeHead(200, {
           "Content-Type": "text/event-stream",
@@ -1101,13 +1120,13 @@ export const { Aeri, foresight } = (function () {
             res.statusCode = ZX.status;
             res.end();
           };
-
           if (ZX.headers && ZX.headers.length) {
             const send = (buffed: Buffer, enc: string) => {
               res.setHeader("Content-Length", buffed.byteLength);
               res.setHeader("Content-Encoding", enc);
               res.end(buffed);
             };
+
             ZX.headers.forEach(([k, v]) => {
               res.setHeader(k, v);
             });
@@ -1128,7 +1147,7 @@ export const { Aeri, foresight } = (function () {
           }
         } else {
           if (ctx) {
-            writeFileSync("index.html", ctx);
+            await fr.writeFile("index.html", ctx);
             return ctx;
           }
         }
@@ -1156,9 +1175,9 @@ export const { Aeri, foresight } = (function () {
 
   class _c {
     secret_key: string = $$.makeID(10);
+    XS: serverInterface;
     constructor(dir: string, env_path: string = "") {
       const PRIV = dir + "/private/";
-
       isDir(PRIV);
       if (!env_path) {
         isFile(PRIV + ".env");
@@ -1166,12 +1185,24 @@ export const { Aeri, foresight } = (function () {
       require("dotenv").config({
         path: env_path ? env_path : PRIV + ".env",
       });
-
       //
       const sk = process.env.SECRET;
       if (sk) this.secret_key = sk;
       this.session.STORAGE = PRIV + ".sessions";
       this.session.JWT_STORAGE = PRIV + ".jwtsessions";
+      this.XS = new reSession(this as any, this.session, this.secret_key).get(
+        this.session.INTERFACE,
+      );
+      //
+    }
+    init() {
+      if (this.postgresClient) {
+        this.sessionInterface = "postgres";
+      }
+
+      this.XS = new reSession(this as any, this.session, this.secret_key).get(
+        this.session.INTERFACE,
+      );
     }
     config = {
       APPLICATION_ROOT: "/",
@@ -1209,18 +1240,18 @@ export const { Aeri, foresight } = (function () {
       this.session.INTERFACE = intrfce;
     }
     //
-    get xsession() {
-      return new reSession(this as any, this.session, this.secret_key).get(
-        this.session.INTERFACE,
-      );
-    }
+    // get xsession() {
+    //   return new reSession(this as any, this.session, this.secret_key).get(
+    //     this.session.INTERFACE,
+    //   );
+    // }
     get jwtsession() {
       return new reSession(this as any, this.session, this.secret_key).get(
         "jwt",
       );
     }
-    GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
-    temp_samesite = "";
+    // GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+    // temp_samesite = "";
   }
   class Aeri extends _c {
     _headattr: any = {};
@@ -1231,7 +1262,7 @@ export const { Aeri, foresight } = (function () {
       this.Z = new zURL(__.makeID(15));
       this._jwt = new _jwt(this.secret_key);
     }
-    url(url: string, option?: urlcfg) {
+    url(url: string) {
       const ins = (f: typeof response) => {
         this.Z.z = new fURL(url, f, false, false);
         return f;
@@ -1287,20 +1318,22 @@ export const { Aeri, foresight } = (function () {
       },
     ) {
       // -------------------------------------------
+      this.init();
       const { url, method, hostname, port, options } = opt;
       let host = hostname ?? "localhost";
       const RN = new runner(this);
       if (url) {
-        const Request = new request(url, method!, {});
+        const Request = new request(url, method!, {}, "");
         await RN.render(Request);
       } else {
         // =============
         const sk = process.env.SSL_KEY;
         const sc = process.env.SSL_CERT;
+
         if (sk && sc) {
           const _options = {
-            key: readFileSync(sk),
-            cert: readFileSync(sc),
+            key: await fr.readFile(sk),
+            cert: await fr.readFile(sc),
             allowHTTP1: true,
             ...options,
           };
@@ -1308,7 +1341,9 @@ export const { Aeri, foresight } = (function () {
           const SRVR = createSecureServer(_options, async function (req, res) {
             // -------------------
             if (req.url && req.method) {
-              const Request = new request(req.url, req.method, req.headers);
+              const sk =
+                req.headers["x-forwarded-for"] || req.socket.remoteAddress;
+              const Request = new request(req.url, req.method, req.headers, sk);
               // -------------------------------------
               if (["POST", "PUT"].includes(req.method)) {
                 let buffers: Buffer[] = [];
@@ -1337,7 +1372,12 @@ export const { Aeri, foresight } = (function () {
               req.method == "GET" &&
               req.headers.upgrade == "websocket"
             ) {
-              const Request = new request(req.url, req.method, req.headers);
+              const Request = new request(
+                req.url,
+                req.method,
+                req.headers,
+                req.headers["x-forwarded-for"] || req.socket.remoteAddress,
+              );
               await RN.wss(Request, ws);
             } else {
               ws.close();
@@ -1515,6 +1555,80 @@ export const { GOAT } = (function () {
 })();
 
 class tg {}
+
+interface bs {
+  f_timed?: number;
+  [key: string]: string | undefined | boolean | number;
+}
+
+// Single query --
+export class PGCache<T extends bs> {
+  client: Client;
+  query: string;
+  f_timed: number;
+  data: Map<any, T>;
+  key: string;
+  constructor(client: Client, key: string, query: string) {
+    this.query = query;
+    this.key = key;
+    this.f_timed = Date.now();
+    this.data = new Map();
+    this.client = client;
+  }
+  async init(val: string): Promise<T | null> {
+    const TQ = await this.client.query({
+      text: this.query + ` where ${this.key} = $1`,
+      values: [val],
+    });
+    // Delete keys with no value
+    for (const [k, v] of this.data) {
+      if (!v) {
+        this.data.delete(k);
+      }
+    }
+    if (TQ.rowCount) {
+      const tr = TQ.rows[0];
+      tr.f_timed = Date.now();
+      this.data.set(val, tr);
+      return tr;
+    } else {
+      this.data.set(val, null as any);
+      return null;
+    }
+  }
+  async checkLast(time: number) {
+    const xl = new Date(time);
+    xl.setMinutes(xl.getMinutes() + 15);
+    if (xl.getTime() < Date.now()) {
+      return true;
+    }
+    return false;
+  }
+  async get(val: string): Promise<T | null> {
+    const hdat = this.data.get(val);
+    if (hdat == undefined) {
+      return await this.init(val);
+    } else {
+      if (hdat && "f_timed" in hdat) {
+        const atv = await this.checkLast(hdat.f_timed!);
+        if (atv) {
+          return await this.init(val);
+        }
+      }
+
+      return hdat;
+    }
+  }
+  async set(data: T) {
+    if (this.key in data) {
+      data.f_timed = Date.now();
+      this.data.set(data[this.key], data);
+    }
+  }
+  async delete(key: string) {
+    this.data.delete(key);
+  }
+}
 
 /**
  * IDEAS

@@ -1,14 +1,8 @@
 import { randomBytes, createHmac, createHash } from "node:crypto";
-import {
-  statSync,
-  readFileSync,
-  writeFileSync,
-  existsSync,
-  mkdirSync,
-  unlinkSync,
-} from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
+import { promises as fr } from "node:fs";
 import { sign, verify } from "jsonwebtoken";
-import { Aeri } from "./index";
+import { $$, Aeri, PGCache, sesh_db } from "./index";
 import { Client } from "pg";
 
 // Types -----------------------
@@ -299,20 +293,20 @@ export class serverInterface extends sidGenerator {
       expires: life,
     });
   }
-  openSession(sid: string) {
+  async openSession(sid: string) {
     if (!sid) {
       return new this.sclass(this.generate(), this.permanent).session;
     }
     if (this._unsign(sid)) {
-      return this.fetchSession(sid);
+      return await this.fetchSession(sid);
     } else {
       return new this.sclass(this.generate(), this.permanent).session;
     }
   }
-  fetchSession(sid: string) {
+  async fetchSession(sid: string) {
     return {};
   }
-  saveSession(
+  async saveSession(
     xsesh: serverSide,
     rsx?: any,
     deleteMe: boolean = false,
@@ -350,33 +344,35 @@ class cacher {
     hash.update(bkey);
     return hash.digest("hex");
   }
-  isFile(path: string) {
+  async isFile(path: string) {
     try {
-      return statSync(path).isFile();
+      const FS = await fr.stat(path);
+      return FS.isFile();
     } catch (err) {
-      writeFileSync(path, str2Buffer(""));
+      await fr.writeFile(path, str2Buffer(""));
       return true;
     }
   }
-  delete(key: string) {
+  async delete(key: string) {
     const gspot = this.path + "/" + this.fileName(key);
     try {
-      if (statSync(gspot).isFile()) {
-        unlinkSync(gspot);
+      const FS = await fr.stat(gspot);
+      if (FS.isFile()) {
+        await fr.unlink(gspot);
       }
     } catch (err) {}
   }
   //   -------------------
-  set(key: string, data: dict<any>, life: number = 0) {
+  async set(key: string, data: dict<any>, life: number = 0) {
     const tempFilePath = this.path + "/" + this.fileName(key);
-    this.isFile(tempFilePath);
+    await this.isFile(tempFilePath);
     Object.assign(data, { life: timeDelta(life) });
-    writeFileSync(tempFilePath, str2Buffer(JSON.stringify(data)));
+    fr.writeFile(tempFilePath, str2Buffer(JSON.stringify(data)));
   }
-  get(key: string) {
+  async get(key: string) {
     const gspot = this.fileName(key);
     try {
-      const rfile = readFileSync(this.path + "/" + gspot);
+      const rfile = await fr.readFile(this.path + "/" + gspot);
       const dt = JSON.parse(buff2Str(rfile));
       if (new Date(dt.life).getTime() - new Date().getTime() > 0) {
         return JSON.parse(dt.data);
@@ -395,7 +391,7 @@ class cSession extends serverInterface {
     super(config, secret);
     this.cacher = new cacher(cacherpath);
   }
-  saveSession(
+  async saveSession(
     xsesh: serverSide,
     rsx?: any,
     deleteMe: boolean = false,
@@ -404,7 +400,7 @@ class cSession extends serverInterface {
     const prefs = this.config.KEY_PREFIX + xsesh.sid;
     if (!Object.entries(xsesh.data).length) {
       if (xsesh.modified || deleteMe) {
-        this.cacher.delete(prefs);
+        await this.cacher.delete(prefs);
         if (rsx) {
           const cookie = this.setCookie(xsesh, 0);
           rsx.setHeader("Set-Cookie", cookie);
@@ -415,38 +411,45 @@ class cSession extends serverInterface {
     const life = this.config.LIFETIME;
     const data = JSON.stringify(xsesh.data);
 
-    this.cacher.set(prefs, { data }, life);
+    await this.cacher.set(prefs, { data }, life);
     if (rsx) {
       const cookie = this.setCookie(xsesh, timeDelta(life));
       rsx.setHeader("Set-Cookie", cookie);
     }
   }
-  fetchSession(sid: string) {
+  async fetchSession(sid: string) {
     const prefs = this.config.KEY_PREFIX + sid;
-    const data = this.cacher.get(prefs);
-    return new this.sclass(sid, this.config.PERMANENT, data).session;
+    const data = await this.cacher.get(prefs);
+    return new this.sclass(sid, this.config.PERMANENT, await data).session;
   }
 }
 
 // --------------
 export class postgreSession extends serverSide {}
 
+/*
+-------------------------
+
+-------------------------
+*/
+// Create cached potgres database here ---
+
 class postgreSQL extends serverInterface {
   sclass = postgreSession;
   client: Client;
+  pgc: PGCache<sesh_db>;
   constructor(client: Client, config: sessionConfig, secret: string) {
     super(config, secret);
     this.client = client;
+
+    this.pgc = new PGCache<sesh_db>(client, "sid", `SELECT * FROM session`);
   }
   async fetchSession(sid: string): Promise<typeof this.sclass> {
     const prefs = this.config.KEY_PREFIX + sid;
-    const itm = await this.client.query({
-      text: "SELECT * FROM session WHERE sid = $1",
-      values: [prefs],
-    });
+    const itms = await this.pgc.get(prefs);
     let data = {};
-    if (itm.rows[0] && "sid" in itm.rows[0]) {
-      data = JSON.parse(itm.rows[0].data);
+    if (itms) {
+      data = JSON.parse(itms.data);
     }
     return new this.sclass(sid, this.config.PERMANENT, data).session;
   }
@@ -457,14 +460,15 @@ class postgreSQL extends serverInterface {
     sameSite: string = "",
   ): Promise<void> {
     const prefs = this.config.KEY_PREFIX + xsesh.sid;
-
     if (!Object.entries(xsesh.data).length) {
       if (xsesh.modified || deleteMe) {
-        await this.client.query({
-          text: `DELETE FROM session WHERE sid = $1`,
-          values: [prefs],
-        });
         if (rsx) {
+          await this.client.query({
+            text: `DELETE FROM session WHERE sid = $1`,
+            values: [prefs],
+          });
+
+          await this.pgc.delete(prefs);
           const cookie = this.setCookie(xsesh, 0);
           rsx.setHeader("Set-Cookie", cookie);
         }
@@ -476,9 +480,14 @@ class postgreSQL extends serverInterface {
 
     if (rsx) {
       const expre = this.getExpiration(this.config, xsesh);
-      this.client.query({
+      await this.client.query({
         text: `INSERT INTO session(sid, data, expiration) VALUES($1, $2, $3)`,
         values: [prefs, data, expre ? expre : null],
+      });
+      await this.pgc.set({
+        sid: prefs,
+        data: data,
+        expiration: expre ?? "",
       });
       const cookie = this.setCookie(xsesh, timeDelta(life), sameSite);
       rsx.setHeader("Set-Cookie", cookie);
@@ -496,7 +505,7 @@ class supaBaseSS extends serverInterface {
     super(config, secret);
     this.client = client;
   }
-  fetchSession(sid: string): any {
+  async fetchSession(sid: string) {
     const prefs = this.config.KEY_PREFIX + sid;
     // ----
     let itm: string[] = this.client.select("data").eq("sid", prefs).data;
@@ -506,12 +515,12 @@ class supaBaseSS extends serverInterface {
     }
     return new this.sclass(sid, this.config.PERMANENT, data).session;
   }
-  saveSession(
+  async saveSession(
     xsesh: serverSide,
     rsx?: any,
     deleteMe?: boolean,
     sameSite: string = "",
-  ): void {
+  ) {
     const prefs = this.config.KEY_PREFIX + xsesh.sid;
     if (!Object.entries(xsesh.data).length) {
       if (xsesh.modified || deleteMe) {
@@ -539,7 +548,6 @@ class supaBaseSS extends serverInterface {
     }
   }
 }
-
 export class reSession {
   config: sessionConfig;
   secret: string;
@@ -578,7 +586,6 @@ export class reSession {
     return new cSession(this.config, this.secret, this.config.STORAGE);
   }
 }
-
 export function hashedToken(len = 64) {
   return createHash("sha1").update(randomBytes(64)).digest("hex");
 }

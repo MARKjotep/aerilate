@@ -1,5 +1,5 @@
 import { IncomingHttpHeaders } from "node:http2";
-import { writeFileSync } from "node:fs";
+import { promises as fr } from "node:fs";
 import { createHash } from "node:crypto";
 
 export interface dict<T> {
@@ -110,9 +110,8 @@ class fileStorage {
     }
   }
 
-  save(dir: string = "./", filename?: string) {
-    writeFileSync(dir + (filename ?? this.filename), this.stream);
-
+  async save(dir: string = "./", filename?: string) {
+    await fr.writeFile(dir + (filename ?? this.filename), this.stream);
     return `${filename ?? this.filename} saved!`;
   }
   close() {}
@@ -269,13 +268,28 @@ export class request {
   isEventStream = false;
   auth = "";
   host = "";
-
-  constructor(url: string, method: string, headers: IncomingHttpHeaders) {
+  path = "";
+  ip: string = "";
+  constructor(
+    url: string,
+    method: string,
+    headers: IncomingHttpHeaders,
+    ip: string | string[] | undefined,
+  ) {
     this.headers = headers;
     this.url = url;
     this.method = method.toLowerCase();
     this.__proc;
     this.host = this.headers[":scheme"] + "://" + this.headers[":authority"];
+    let _path = (this.headers[":path"] as string) ?? this.url;
+    this.path = _path.split("?")[0];
+    if (ip) {
+      if (Array.isArray(ip)) {
+        this.ip = ip[0];
+      } else {
+        this.ip = ip;
+      }
+    }
   }
   get contentType() {
     return this.headers["content-type"];
