@@ -723,7 +723,6 @@ export const { Aeri, foresight } = (function () {
   }
   // --------------------
   const rBytes = new RegExp(/(\d+)(\d*)/, "m");
-
   class rsx {
     furl: fURL | null;
     status: number;
