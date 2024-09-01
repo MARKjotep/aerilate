@@ -571,21 +571,8 @@ export const { Aeri, foresight } = (function () {
       this.lang = lang;
     }
     _head(heads: headP[]) {
-      const [_h1, _h2] = heads;
-      const xxh = $$.O.items(_h1).reduce<any>((prv, [k, v]) => {
-        if (k == "title" || k == "base") {
-          let vl = v;
-          if (k in _h2) {
-            vl = _h2[k];
-            delete _h2[k];
-          }
-          prv[k] = vl;
-        } else {
-          prv[k] = v;
-        }
-        return prv;
-      }, {});
-      return [...__.headAttr(_h2), ...__.headAttr(xxh)];
+      const [_h1] = heads;
+      return [...__.headAttr(_h1)];
     }
     html(ctx: string | foresight | any = ""): string {
       let bscr = "";
@@ -963,6 +950,7 @@ export const { Aeri, foresight } = (function () {
             const sjwt = app._jwt.open(jwtv, { minutes: 30 });
             const sesh = await app.XS.openSession(sid);
             FS.timedJWT._xjwt = app._jwt;
+            FS._headattr = app._headattr;
 
             if (!sjwt.new) {
               a_args["jwt"] = true;
@@ -1015,11 +1003,7 @@ export const { Aeri, foresight } = (function () {
 
             // ---------------
             if (method == "get") {
-              const htx = new htmlx(
-                [FS._headattr, app._headattr],
-                FS.lang,
-                sesh,
-              ).html(CTX);
+              const htx = new htmlx([FS._headattr], FS.lang, sesh).html(CTX);
               this.setTL("text/html");
               return htx;
             } else {
