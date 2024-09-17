@@ -4,7 +4,7 @@ import {
   ServerHttp2Stream,
 } from "node:http2";
 import zlib from "node:zlib";
-import { writeFileSync, statSync, mkdirSync } from "node:fs";
+import { writeFileSync, statSync, mkdirSync, readFileSync } from "node:fs";
 import { promises as fr } from "node:fs";
 import {
   reSession,
@@ -221,6 +221,173 @@ export const { $$ } = (function () {
   return { $$ };
 })();
 
+// Server temporary cache map
+export class tempV<T extends fs> {
+  key: string;
+  data: Map<any, T>;
+  constructor({ key }: { key: string }) {
+    this.key = key;
+    this.data = new Map();
+  }
+  get(val: string | undefined): T | undefined {
+    return this.data.get(val);
+  }
+  set(data: T) {
+    if (this.key in data) {
+      this.data.set(data[this.key], data);
+    }
+  }
+  delete(key: string) {
+    this.data.delete(key);
+  }
+}
+
+// Single query --
+export class PGCache<T extends bs> {
+  client: Client;
+  query: string;
+  f_timed: number;
+  data: Map<any, T>;
+  key: string;
+  constructor(client: Client, key: string, query: string) {
+    this.query = query;
+    this.key = key;
+    this.f_timed = Date.now();
+    this.data = new Map();
+    this.client = client;
+  }
+  async init(val: string): Promise<T | null> {
+    const TQ = await this.client.query({
+      text: this.query + ` where ${this.key} = $1`,
+      values: [val],
+    });
+    // Delete keys with no value
+    for (const [k, v] of this.data) {
+      if (!v) {
+        this.data.delete(k);
+      }
+    }
+    if (TQ.rowCount) {
+      const tr = TQ.rows[0];
+      tr.f_timed = Date.now();
+      this.data.set(val, tr);
+      return tr;
+    } else {
+      this.data.set(val, null as any);
+      return null;
+    }
+  }
+  async checkLast(time: number) {
+    const xl = new Date(time);
+    xl.setMinutes(xl.getMinutes() + 15);
+    if (xl.getTime() < Date.now()) {
+      return true;
+    }
+    return false;
+  }
+  async get(val: string | undefined): Promise<T | null> {
+    if (val) {
+      const hdat = this.data.get(val);
+      if (hdat == undefined) {
+        return await this.init(val);
+      } else {
+        if (hdat && "f_timed" in hdat) {
+          const atv = await this.checkLast(hdat.f_timed!);
+          if (atv) {
+            return await this.init(val);
+          }
+        }
+        return hdat;
+      }
+    }
+    return null;
+  }
+  async set(data: T) {
+    if (this.key in data) {
+      data.f_timed = Date.now();
+      this.data.set(data[this.key], data);
+    }
+  }
+  async delete(key: string) {
+    this.data.delete(key);
+  }
+}
+
+// json files
+export class ForFS<T extends fs> {
+  fs: string;
+  f_timed: number;
+  data: Map<any, T>;
+  key: string;
+  dir: string;
+  constructor({ dir, fs, key }: { dir: string; fs: string; key: string }) {
+    this.dir = dir + "/ffs";
+    this.key = key;
+    this.f_timed = Date.now();
+    this.data = new Map();
+    this.fs = this.dir + `/${fs}.json`;
+    if (isDir(this.dir) && isFile(this.fs, "{}")) {
+      const frr = readFileSync(this.fs);
+      if (frr) {
+        const FJSON = JSON.parse(frr.toString());
+        this.data = new Map($$.O.items(FJSON));
+      }
+    }
+  }
+  async get(val: string | undefined): Promise<T | null> {
+    const hdat = this.data.get(val);
+    if (hdat) return hdat;
+    return null;
+  }
+  async set(data: T) {
+    if (this.key in data) {
+      const frr = await fr.readFile(this.fs);
+      if (frr) {
+        const FJSON = JSON.parse(frr.toString());
+        const dtk = data[this.key] as string;
+        FJSON[dtk] = data;
+        await fr.writeFile(this.fs, JSON.stringify(FJSON));
+      }
+      this.data.set(data[this.key], data);
+    }
+  }
+  async delete(key: string) {
+    if (await this.get(key)) {
+      const frr = await fr.readFile(this.fs);
+      if (frr) {
+        const FJSON = JSON.parse(frr.toString());
+        if (key in FJSON) {
+          delete FJSON[key];
+          await fr.writeFile(this.fs, JSON.stringify(FJSON));
+        }
+        this.data.delete(key);
+      }
+    }
+  }
+  async json() {
+    const fraw = await fr.readFile(this.fs);
+    const JPR = JSON.parse(fraw.toString());
+    return $$.O.vals(JPR);
+  }
+}
+
+const isDir = (path: string) => {
+  try {
+    return statSync(path).isDirectory();
+  } catch (err) {
+    mkdirSync(path);
+    return true;
+  }
+};
+const isFile = (path: string, data: string = "") => {
+  try {
+    return statSync(path).isFile();
+  } catch (err) {
+    writeFileSync(path, Buffer.from(data));
+    return true;
+  }
+};
+
 const wssClients: dict<dict<repsWSS>> = {};
 export const { response, session, auth_bearer, jwt, jwt_refresh, wss } =
   (function () {
@@ -316,7 +483,8 @@ export const { response, session, auth_bearer, jwt, jwt_refresh, wss } =
       const [a, b, c] = itm;
 
       const OG: () => any = c.value;
-      c.value = function (args: any = {}) {
+
+      c.value = async function (args: any = {}) {
         if ("session" in args && args.session) {
           const nms: any = [args];
           return OG.apply(this, nms);
@@ -328,7 +496,7 @@ export const { response, session, auth_bearer, jwt, jwt_refresh, wss } =
     function jwt(...itm: any[]) {
       const [a, b, c] = itm;
       const OG: () => any = c.value;
-      c.value = function (args: any = {}) {
+      c.value = async function (args: any = {}) {
         if ("jwt" in args) {
           const nms: any = [args];
           return OG.apply(this, nms);
@@ -340,7 +508,7 @@ export const { response, session, auth_bearer, jwt, jwt_refresh, wss } =
     function jwt_refresh(...itm: any[]) {
       const [a, b, c] = itm;
       const OG: () => any = c.value;
-      c.value = function (args: any = {}) {
+      c.value = async function (args: any = {}) {
         if ("jwt_refresh" in args) {
           const nms: any = [args];
           return OG.apply(this, nms);
@@ -582,7 +750,7 @@ export const { Aeri, foresight } = (function () {
       } else {
         _ctx = ctx;
       }
-      const _id = $$.makeID(7);
+      const _id = $$.makeID(5);
       let fin = "<!DOCTYPE html>";
       fin += `\n<html lang="${this.lang}">`;
       fin += "\n<head>\n";
@@ -608,7 +776,6 @@ export const { Aeri, foresight } = (function () {
     broadcastWSS = false;
     maxClient: number | null = null;
     withSession: boolean = false;
-
     constructor(
       url: string,
       cname: typeof response | typeof wss | null = null,
@@ -792,7 +959,6 @@ export const { Aeri, foresight } = (function () {
       let sid = "";
       let jwtv = "";
       let refreshjwt: any | null = null;
-
       if ("session" in req.cookies) {
         // Include the samesite
         sid = req.cookies.session;
@@ -942,6 +1108,14 @@ export const { Aeri, foresight } = (function () {
           const byteR = req.headers.range;
           return await this.file(url, mtype, byteR);
         } else if (f) {
+          let ipCAN = true;
+          if (app.ip.LIMIT && req.ip) {
+            ipCAN = app.ipLimiter.check(req.ip);
+          }
+          if (!ipCAN) {
+            this.status = 429;
+            return null;
+          }
           const FS: any = new f();
           if (typeof FS[method] == "function") {
             const z_args = __.args(x_args, y_args);
@@ -1091,6 +1265,7 @@ export const { Aeri, foresight } = (function () {
       const { parsed, query } = __.parseURL(req.url);
       req.urlQuery = query;
       const ZX = this.Z.get(parsed, false, req.url);
+
       if (res && req.isEventStream) {
         res.writeHead(200, {
           "Content-Type": "text/event-stream",
@@ -1098,8 +1273,8 @@ export const { Aeri, foresight } = (function () {
         });
         await ZX.eventStream(this.app, req, res);
       } else {
-        const ctx = await ZX.response(req.method, this.app, req);
         if (res) {
+          const ctx = await ZX.response(req.method, this.app, req);
           const errs = () => {
             res.statusCode = ZX.status;
             res.end();
@@ -1110,7 +1285,6 @@ export const { Aeri, foresight } = (function () {
               res.setHeader("Content-Encoding", enc);
               res.end(buffed);
             };
-
             ZX.headers.forEach(([k, v]) => {
               res.setHeader(k, v);
             });
@@ -1130,6 +1304,7 @@ export const { Aeri, foresight } = (function () {
             errs();
           }
         } else {
+          const ctx = await ZX.response(req.method, this.app, req);
           if (ctx) {
             await fr.writeFile("index.html", ctx);
             return ctx;
@@ -1140,26 +1315,43 @@ export const { Aeri, foresight } = (function () {
   }
   // --------------------
 
-  const isDir = (path: string) => {
-    try {
-      return statSync(path).isDirectory();
-    } catch (err) {
-      mkdirSync(path);
+  // IP LIMITER
+  class ipLimit extends tempV<{ ip: string; request: number; time: number }> {
+    seconds: number;
+    rate: number;
+    constructor({ seconds = 60, rate = 100 }) {
+      super({ key: "ip" });
+      this.seconds = seconds;
+      this.rate = rate;
+    }
+    check(ip: string) {
+      if (!this.data.has(ip)) {
+        this.reset(ip);
+      }
+      let tg = this.get(ip)!;
+      if (tg.time <= Date.now()) {
+        tg = this.reset(ip);
+      }
+      tg.request += 1;
+      //check the request rate
+      if (tg.request > this.rate) {
+        return false;
+      }
       return true;
     }
-  };
-  const isFile = (path: string) => {
-    try {
-      return statSync(path).isFile();
-    } catch (err) {
-      writeFileSync(path, Buffer.from(""));
-      return true;
+    reset(ip: string) {
+      const ndate = new Date();
+      ndate.setSeconds(ndate.getSeconds() + this.seconds);
+      const data = { ip: ip, request: 0, time: ndate.getTime() };
+      this.data.set(ip, data);
+      return data;
     }
-  };
+  }
 
   class _c {
     secret_key: string = $$.makeID(10);
     XS: serverInterface;
+    dir = "";
     constructor(dir: string, env_path: string = "") {
       const PRIV = dir + "/private/";
       isDir(PRIV);
@@ -1190,14 +1382,14 @@ export const { Aeri, foresight } = (function () {
     }
     config = {
       APPLICATION_ROOT: "/",
-      CSRF_TIME_LIMIT: 600,
     };
+
     session = {
       COOKIE_NAME: "session",
       COOKIE_DOMAIN: "127.0.0.1",
       COOKIE_PATH: null,
       COOKIE_HTTPONLY: true,
-      COOKIE_SECURE: false,
+      COOKIE_SECURE: true,
       REFRESH_EACH_REQUEST: false,
       COOKIE_SAMESITE: "Strict",
       KEY_PREFIX: "session:",
@@ -1223,19 +1415,18 @@ export const { Aeri, foresight } = (function () {
     set sessionInterface(intrfce: "supabase" | "postgres") {
       this.session.INTERFACE = intrfce;
     }
-    //
-    // get xsession() {
-    //   return new reSession(this as any, this.session, this.secret_key).get(
-    //     this.session.INTERFACE,
-    //   );
-    // }
     get jwtsession() {
       return new reSession(this as any, this.session, this.secret_key).get(
         "jwt",
       );
     }
-    // GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
-    // temp_samesite = "";
+
+    ip = {
+      LIMIT: false,
+      RATE: 100,
+      SECONDS: 60,
+    };
+    ipLimiter = new ipLimit({ rate: this.ip.RATE, seconds: this.ip.SECONDS });
   }
   class Aeri extends _c {
     _headattr: any = {};
@@ -1243,6 +1434,7 @@ export const { Aeri, foresight } = (function () {
     _jwt: _jwt;
     constructor(dir: string, env_path: string = "") {
       super(dir, env_path);
+      this.dir = "./" + dir.split("/").slice(-1)[0];
       this.Z = new zURL(__.makeID(15));
       this._jwt = new _jwt(this.secret_key);
     }
@@ -1286,28 +1478,20 @@ export const { Aeri, foresight } = (function () {
       return new rsx(null, 302, [["Location", url]]);
     }
     // ------------------
-    async run(
-      opt: {
-        url?: string;
-        method?: string;
-        hostname?: string;
-        port?: number;
-        options?: any;
-      } = {
-        url: "",
-        method: "GET",
-        hostname: "localhost",
-        port: 3000,
-        options: {},
-      },
-    ) {
+    async run({
+      url = "",
+      method = "GET",
+      hostname = "localhost",
+      port = 3000,
+      options = {},
+    }) {
       // -------------------------------------------
       this.init();
-      const { url, method, hostname, port, options } = opt;
+      // const { url, method, hostname, port, options } = opt;
       let host = hostname ?? "localhost";
       const RN = new runner(this);
       if (url) {
-        const Request = new request(url, method!, {}, "");
+        const Request = new request(url.trim(), method!, {}, "");
         await RN.render(Request);
       } else {
         // =============
@@ -1327,6 +1511,7 @@ export const { Aeri, foresight } = (function () {
             if (req.url && req.method) {
               const sk =
                 req.headers["x-forwarded-for"] || req.socket.remoteAddress;
+
               const Request = new request(req.url, req.method, req.headers, sk);
               // -------------------------------------
               if (["POST", "PUT"].includes(req.method)) {
@@ -1538,80 +1723,12 @@ export const { GOAT } = (function () {
   return { GOAT };
 })();
 
-class tg {}
-
+interface fs {
+  [key: string]: string | undefined | boolean | number;
+}
 interface bs {
   f_timed?: number;
   [key: string]: string | undefined | boolean | number;
-}
-
-// Single query --
-export class PGCache<T extends bs> {
-  client: Client;
-  query: string;
-  f_timed: number;
-  data: Map<any, T>;
-  key: string;
-  constructor(client: Client, key: string, query: string) {
-    this.query = query;
-    this.key = key;
-    this.f_timed = Date.now();
-    this.data = new Map();
-    this.client = client;
-  }
-  async init(val: string): Promise<T | null> {
-    const TQ = await this.client.query({
-      text: this.query + ` where ${this.key} = $1`,
-      values: [val],
-    });
-    // Delete keys with no value
-    for (const [k, v] of this.data) {
-      if (!v) {
-        this.data.delete(k);
-      }
-    }
-    if (TQ.rowCount) {
-      const tr = TQ.rows[0];
-      tr.f_timed = Date.now();
-      this.data.set(val, tr);
-      return tr;
-    } else {
-      this.data.set(val, null as any);
-      return null;
-    }
-  }
-  async checkLast(time: number) {
-    const xl = new Date(time);
-    xl.setMinutes(xl.getMinutes() + 15);
-    if (xl.getTime() < Date.now()) {
-      return true;
-    }
-    return false;
-  }
-  async get(val: string): Promise<T | null> {
-    const hdat = this.data.get(val);
-    if (hdat == undefined) {
-      return await this.init(val);
-    } else {
-      if (hdat && "f_timed" in hdat) {
-        const atv = await this.checkLast(hdat.f_timed!);
-        if (atv) {
-          return await this.init(val);
-        }
-      }
-
-      return hdat;
-    }
-  }
-  async set(data: T) {
-    if (this.key in data) {
-      data.f_timed = Date.now();
-      this.data.set(data[this.key], data);
-    }
-  }
-  async delete(key: string) {
-    this.data.delete(key);
-  }
 }
 
 /**

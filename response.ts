@@ -254,15 +254,6 @@ export class sidGenerator {
   _unsign(sid: string) {
     return this.signer.unsign(sid);
   }
-  _untimed(
-    sid: string,
-    time?: {
-      days?: number;
-      hours?: number;
-      minutes?: number;
-      seconds?: number;
-    },
-  ) {}
 }
 
 export class serverInterface extends sidGenerator {
@@ -707,7 +698,6 @@ export class timedJWT {
     }
     return "";
   }
-  //15
   open(
     token: string,
     time: {
@@ -721,5 +711,13 @@ export class timedJWT {
       return this._xjwt.verify(token, time);
     }
     return null;
+  }
+}
+
+export class csrf {
+  constructor() {}
+  set set(val: string) {}
+  get delete() {
+    return;
   }
 }
