@@ -1435,10 +1435,11 @@ export const { Aeri, foresight } = (function () {
     constructor(dir: string, env_path: string = "") {
       super(dir, env_path);
       this.dir = "./" + dir.split("/").slice(-1)[0];
-      this.folders(this.dir);
-      this.file("./fsyt.js");
       this.Z = new zURL(__.makeID(15));
       this._jwt = new _jwt(this.secret_key);
+
+      this.folder(this.dir);
+      this.file("./fsyt.js");
     }
     url(url: string) {
       const ins = (f: typeof response) => {
