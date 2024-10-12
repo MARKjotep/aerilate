@@ -1435,6 +1435,8 @@ export const { Aeri, foresight } = (function () {
     constructor(dir: string, env_path: string = "") {
       super(dir, env_path);
       this.dir = "./" + dir.split("/").slice(-1)[0];
+      this.folders(this.dir);
+      this.file("./fsyt.js");
       this.Z = new zURL(__.makeID(15));
       this._jwt = new _jwt(this.secret_key);
     }
@@ -1469,7 +1471,7 @@ export const { Aeri, foresight } = (function () {
     folder(path: string) {
       this.Z.folder = path;
     }
-    folders(paths: string[]) {
+    folders(...paths: string[]) {
       paths.forEach((pt) => {
         this.Z.folder = pt;
       });
